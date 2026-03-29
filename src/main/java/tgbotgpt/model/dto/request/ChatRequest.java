@@ -15,7 +15,8 @@ import java.util.Map;
         "model",
         "messages",
         "max_tokens",
-        "temperature"
+        "temperature",
+        "stream"
 })
 @Generated("jsonschema2pojo")
 @Data
@@ -30,6 +31,8 @@ public class ChatRequest {
     private Integer maxTokens;
     @JsonProperty("temperature")
     private Double temperature;
+    @JsonProperty("stream")
+    private Boolean stream;
     @JsonIgnore
     private Map<String, Object> additionalProperties = new HashMap<>();
 
