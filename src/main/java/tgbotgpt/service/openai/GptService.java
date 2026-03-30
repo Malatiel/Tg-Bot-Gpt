@@ -1,6 +1,5 @@
 package tgbotgpt.service.openai;
 
-import com.pengrad.telegrambot.model.Chat;
 import com.pengrad.telegrambot.model.Update;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -12,10 +11,11 @@ import tgbotgpt.clients.OpenAIApiClient;
 import tgbotgpt.model.dto.Message;
 import tgbotgpt.model.dto.request.ChatRequest;
 import tgbotgpt.model.dto.response.ChatResponse;
-import tgbotgpt.model.dto.response.StreamChunk;
+import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
 import tgbotgpt.utils.MessageLog;
+import tgbotgpt.utils.UpdateUtils;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,13 +30,14 @@ public class GptService {
     private final Environment env;
     private final RateLimiter rateLimiter;
     private final UserSettingsService userSettings;
+    private final ChatHistoryService chatHistory;
 
     @Value("${openai.maxtokens}")
     private Integer maxtokens;
     @Value("${openai.temperature}")
     private Double temperature;
     @Value("${openai.systemprompt}")
-    private String systemprompt;
+    private String defaultSystemPrompt;
     @Value("${openai.max.message.pool.size}")
     private Integer maxMessagePoolSize;
     @Value("${bot.presentation}")
@@ -49,11 +50,13 @@ public class GptService {
     private final Map<Long, MessageLog<Message>> userContext = new ConcurrentHashMap<>();
     private final AtomicInteger ntokens = new AtomicInteger(0);
 
-    public GptService(OpenAIApiClient client, Environment env, RateLimiter rateLimiter, UserSettingsService userSettings) {
+    public GptService(OpenAIApiClient client, Environment env, RateLimiter rateLimiter,
+                      UserSettingsService userSettings, ChatHistoryService chatHistory) {
         this.client = client;
         this.env = env;
         this.rateLimiter = rateLimiter;
         this.userSettings = userSettings;
+        this.chatHistory = chatHistory;
     }
 
     public int getNumTokens() {
@@ -83,48 +86,128 @@ public class GptService {
         }
     }
 
-    public String sendMessage(Update update) {
-        Long userId = update.message().from().id();
+    // --- Shared gate: permission + rate limit + ensure user ---
 
+    /**
+     * Validates permission, rate limit, and ensures user exists.
+     * Returns an error message if blocked, or empty if OK.
+     */
+    private Optional<String> validateRequest(Update update) {
         if (!checkPermission(update)) {
-            return "Sorry, you are not in the access list.";
+            return Optional.of("Sorry, you are not in the access list.");
         }
 
+        Long userId = update.message().from().id();
         if (!rateLimiter.isAllowed(userId)) {
             long seconds = rateLimiter.getSecondsUntilReset(userId);
-            return String.format("Rate limit exceeded. Try again in %d seconds.", seconds);
+            return Optional.of(String.format("Rate limit exceeded. Try again in %d seconds.", seconds));
+        }
+
+        ensureUser(update);
+        return Optional.empty();
+    }
+
+    // --- Shared helpers ---
+
+    private Message createSystemMessage(String prompt) {
+        Message msg = new Message();
+        msg.setRole("system");
+        msg.setContent(prompt);
+        return msg;
+    }
+
+    private void persistExchange(Long userId, String userText, String assistantText, Integer tokens) {
+        chatHistory.saveMessage(userId, "user", userText, null);
+        chatHistory.saveMessage(userId, "assistant", assistantText, tokens);
+        if (tokens != null) {
+            userSettings.recordUsage(userId, tokens);
+        }
+    }
+
+    // --- Public API ---
+
+    public String sendMessage(Update update) {
+        Optional<String> blocked = validateRequest(update);
+        if (blocked.isPresent()) return blocked.get();
+
+        Long userId = update.message().from().id();
+        String userText = update.message().text();
+
+        // Prompt injection check on user message
+        if (userSettings.containsInjection(userText)) {
+            log.warn("Prompt injection attempt in message from user {}", userId);
+            return "Your message contains disallowed patterns.";
         }
 
         try {
             ChatRequest chatRequest = createChatRequest(update);
             ChatResponse response = client.getCompletion(chatRequest).block();
-            ntokens.addAndGet(Objects.requireNonNull(response).getUsage().getTotalTokens());
+            int tokens = Objects.requireNonNull(response).getUsage().getTotalTokens();
+            ntokens.addAndGet(tokens);
 
-            if (isPrivate(update)) {
-                addAssistantMessage(update, response.getChoices().get(0).getMessage().getContent());
+            String content = response.getChoices().get(0).getMessage().getContentAsString();
+
+            if (UpdateUtils.isPrivate(update)) {
+                addAssistantMessage(update, content);
             }
 
-            return response.getChoices().get(0).getMessage().getContent();
+            persistExchange(userId, userText, content, tokens);
+            return content;
         } catch (Exception e) {
             log.error("Error: ", e);
             return "Sorry, something went wrong.";
         }
     }
 
-    /**
-     * Sends a message and returns a streaming Flux of text chunks.
-     * Each emitted string is the content delta from OpenAI.
-     */
-    public Flux<String> sendMessageStream(Update update) {
+    public String sendVisionMessage(Update update, String base64Image, String mimeType, String caption) {
+        Optional<String> blocked = validateRequest(update);
+        if (blocked.isPresent()) return blocked.get();
+
         Long userId = update.message().from().id();
 
-        if (!checkPermission(update)) {
-            return Flux.just("Sorry, you are not in the access list.");
+        // Prompt injection check on caption
+        if (userSettings.containsInjection(caption)) {
+            log.warn("Prompt injection attempt in image caption from user {}", userId);
+            return "Your caption contains disallowed patterns.";
         }
 
-        if (!rateLimiter.isAllowed(userId)) {
-            long seconds = rateLimiter.getSecondsUntilReset(userId);
-            return Flux.just(String.format("Rate limit exceeded. Try again in %d seconds.", seconds));
+        try {
+            Message visionMsg = Message.ofVision(caption, base64Image, mimeType);
+            String systemPrompt = userSettings.getSystemPrompt(userId);
+            String userModel = userSettings.getModel(userId);
+            if (!userModel.startsWith("gpt-4o")) {
+                userModel = "gpt-4o-mini";
+            }
+
+            ChatRequest chatRequest = new ChatRequest();
+            chatRequest.setModel(userModel);
+            chatRequest.setTemperature(temperature);
+            chatRequest.setMaxTokens(maxtokens);
+            chatRequest.setMessages(List.of(createSystemMessage(systemPrompt), visionMsg));
+
+            ChatResponse response = client.getCompletion(chatRequest).block();
+            int tokens = Objects.requireNonNull(response).getUsage().getTotalTokens();
+            ntokens.addAndGet(tokens);
+
+            String content = response.getChoices().get(0).getMessage().getContentAsString();
+            persistExchange(userId, "[image] " + (caption != null ? caption : ""), content, tokens);
+            return content;
+        } catch (Exception e) {
+            log.error("Vision error: ", e);
+            return "Sorry, something went wrong processing your image.";
+        }
+    }
+
+    public Flux<String> sendMessageStream(Update update) {
+        Optional<String> blocked = validateRequest(update);
+        if (blocked.isPresent()) return Flux.just(blocked.get());
+
+        Long userId = update.message().from().id();
+        String userText = update.message().text();
+
+        if (userSettings.containsInjection(userText)) {
+            log.warn("Prompt injection attempt in stream message from user {}", userId);
+            return Flux.just("Your message contains disallowed patterns.");
         }
 
         try {
@@ -134,20 +217,20 @@ public class GptService {
             return client.getCompletionStream(chatRequest)
                     .filter(chunk -> chunk.getChoices() != null && !chunk.getChoices().isEmpty())
                     .map(chunk -> {
-                        StreamChunk sc = chunk;
-                        String content = sc.getChoices().get(0).getDelta() != null
-                                ? sc.getChoices().get(0).getDelta().getContent()
+                        String content = chunk.getChoices().get(0).getDelta() != null
+                                ? chunk.getChoices().get(0).getDelta().getContentAsString()
                                 : null;
-                        if (content != null) {
+                        if (content != null && !content.isEmpty()) {
                             fullResponse.append(content);
                         }
                         return content != null ? content : "";
                     })
                     .filter(s -> !s.isEmpty())
                     .doOnComplete(() -> {
-                        if (isPrivate(update) && !fullResponse.isEmpty()) {
+                        if (UpdateUtils.isPrivate(update) && !fullResponse.isEmpty()) {
                             addAssistantMessage(update, fullResponse.toString());
                         }
+                        persistExchange(userId, userText, fullResponse.toString(), null);
                     })
                     .doOnError(e -> log.error("Stream error: ", e));
         } catch (Exception e) {
@@ -157,11 +240,14 @@ public class GptService {
     }
 
     public String sendCustomMessage(Update update, String text) {
+        Optional<String> blocked = validateRequest(update);
+        if (blocked.isPresent()) return blocked.get();
+
         try {
             ChatRequest chatRequest = createCustomChatRequest(text);
             ChatResponse response = client.getCompletion(chatRequest).block();
             ntokens.addAndGet(Objects.requireNonNull(response).getUsage().getTotalTokens());
-            return response.getChoices().get(0).getMessage().getContent();
+            return response.getChoices().get(0).getMessage().getContentAsString();
         } catch (Exception e) {
             log.error("Error: ", e);
             return "Sorry, something went wrong.";
@@ -169,8 +255,10 @@ public class GptService {
     }
 
     public String resetUserContext(Update update) {
-        if (isPrivate(update)) {
-            userContext.remove(update.message().from().id());
+        if (UpdateUtils.isPrivate(update)) {
+            Long userId = update.message().from().id();
+            userContext.remove(userId);
+            chatHistory.clearHistory(userId);
             return "User context has been reset for " + update.message().from().firstName();
         } else {
             return "Nothing to reset in a group chat.";
@@ -188,9 +276,35 @@ public class GptService {
         return userSettings.getModel(userId);
     }
 
+    public String setUserPrompt(Long userId, String prompt) {
+        return userSettings.setCustomPrompt(userId, prompt);
+    }
+
+    public String resetUserPrompt(Long userId) {
+        return userSettings.resetPrompt(userId);
+    }
+
+    public int getUserTokens(Long userId) {
+        return userSettings.getUserTokens(userId);
+    }
+
+    public int getUserMessages(Long userId) {
+        return userSettings.getUserMessages(userId);
+    }
+
+    // --- Private helpers ---
+
+    private void ensureUser(Update update) {
+        Long userId = update.message().from().id();
+        String username = update.message().from().username();
+        String firstName = update.message().from().firstName();
+        userSettings.getOrCreateUser(userId, username, firstName);
+    }
+
     private ChatRequest createChatRequest(Update update) {
         Long userId = update.message().from().id();
         String userModel = userSettings.getModel(userId);
+        String systemPrompt = userSettings.getSystemPrompt(userId);
 
         ChatRequest chatRequest = new ChatRequest();
         chatRequest.setModel(userModel);
@@ -198,20 +312,18 @@ public class GptService {
         chatRequest.setMaxTokens(maxtokens);
 
         List<Message> messages = new ArrayList<>();
-        Message systemMessage = new Message();
-        systemMessage.setRole("system");
-        systemMessage.setContent(systemprompt);
-        messages.add(systemMessage);
+        messages.add(createSystemMessage(systemPrompt));
 
-        if (isPrivate(update)) {
-            if (!userContext.containsKey(userId)) {
-                userContext.put(userId, new MessageLog<>(maxMessagePoolSize));
+        if (UpdateUtils.isPrivate(update)) {
+            MessageLog<Message> log = userContext.computeIfAbsent(userId, id -> {
+                MessageLog<Message> newLog = new MessageLog<>(maxMessagePoolSize);
                 if (!examples.isEmpty()) {
-                    userContext.get(userId).addAll(getExamples());
+                    newLog.addAll(getExamples());
                 }
-            }
+                return newLog;
+            });
             addUserMessage(update);
-            messages.addAll(userContext.get(userId));
+            messages.addAll(log);
         } else {
             if (!examples.isEmpty()) {
                 messages.addAll(getExamples());
@@ -232,18 +344,11 @@ public class GptService {
         chatRequest.setTemperature(temperature);
         chatRequest.setMaxTokens(maxtokens);
 
-        List<Message> messages = new ArrayList<>();
-        Message systemMessage = new Message();
-        systemMessage.setRole("system");
-        systemMessage.setContent(systemprompt);
-        messages.add(systemMessage);
-
         Message userMessage = new Message();
         userMessage.setRole("user");
         userMessage.setContent(text);
-        messages.add(userMessage);
 
-        chatRequest.setMessages(messages);
+        chatRequest.setMessages(List.of(createSystemMessage(defaultSystemPrompt), userMessage));
         return chatRequest;
     }
 
@@ -253,12 +358,16 @@ public class GptService {
 
     private Message createMessage(String example) {
         String[] parts = example.split(":", 2);
-        String role = parts[0];
-        String content = parts[1];
-
+        if (parts.length < 2) {
+            log.warn("Malformed example (missing ':'): {}", example);
+            Message message = new Message();
+            message.setRole("user");
+            message.setContent(example);
+            return message;
+        }
         Message message = new Message();
-        message.setRole(role.toLowerCase());
-        message.setContent(content);
+        message.setRole(parts[0].toLowerCase());
+        message.setContent(parts[1]);
         return message;
     }
 
@@ -291,9 +400,5 @@ public class GptService {
 
         log.warn("Unauthorized user: id={}, username={}", userId, username);
         return false;
-    }
-
-    private boolean isPrivate(Update update) {
-        return update.message().chat().type().equals(Chat.Type.Private);
     }
 }
