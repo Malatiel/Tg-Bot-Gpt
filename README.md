@@ -15,14 +15,15 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - Per-user conversation history (configurable pool size)
 - Group chat support (mention the bot by name)
 - Whitelist-based access control (by user ID, username, or group name)
-- Token usage tracking (`/usage` command)
+- **Prompt injection protection** — blocks known LLM manipulation patterns
+- Per-user usage tracking (`/usage` command)
 
 ## Commands
 
 | Command            | Description                              |
 |--------------------|------------------------------------------|
 | `/start`           | Bot introduction                         |
-| `/usage`           | Show total token count                   |
+| `/usage`           | Show your personal token/message stats   |
 | `/reset`           | Reset conversation context + history     |
 | `/model`           | Show current model                       |
 | `/model <name>`    | Switch to a different GPT model          |
@@ -105,6 +106,7 @@ All settings are in `src/main/resources/application.properties`:
 
 - API keys and tokens are stored in `.env` (gitignored), never in source code
 - All user input (prompts, usernames) is sanitized against control characters
+- Prompt injection detection blocks known LLM attack patterns (jailbreaks, role overrides, instruction ignoring) in messages, captions, and custom prompts
 - Image downloads restricted to HTTPS from `api.telegram.org` only
 - Image type and size validation before processing
 - Per-user rate limiting prevents abuse and budget overruns
