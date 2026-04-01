@@ -18,20 +18,27 @@ public class ChatHistoryService {
     private static final int MAX_HISTORY_DAYS = 30;
 
     private final ChatMessageRepository messageRepository;
+    private final EncryptionService encryption;
 
-    public ChatHistoryService(ChatMessageRepository messageRepository) {
+    public ChatHistoryService(ChatMessageRepository messageRepository, EncryptionService encryption) {
         this.messageRepository = messageRepository;
+        this.encryption = encryption;
     }
 
     @Transactional
     public void saveMessage(Long userId, String role, String content, Integer tokens) {
-        ChatMessage msg = new ChatMessage(userId, role, content, tokens);
+        ChatMessage msg = new ChatMessage(userId, role, encryption.encrypt(content), tokens);
         messageRepository.save(msg);
     }
 
     public List<ChatMessage> getRecentMessages(Long userId, int limit) {
         List<ChatMessage> messages = messageRepository.findByUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, limit));
-        return messages.reversed();
+        List<ChatMessage> reversed = messages.reversed();
+        // Decrypt content in-place
+        for (ChatMessage msg : reversed) {
+            msg.setContent(encryption.decrypt(msg.getContent()));
+        }
+        return reversed;
     }
 
     @Transactional

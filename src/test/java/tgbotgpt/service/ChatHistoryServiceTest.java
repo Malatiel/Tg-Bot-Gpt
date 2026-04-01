@@ -13,7 +13,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DataJpaTest
-@Import(ChatHistoryService.class)
+@Import({ChatHistoryService.class, EncryptionService.class})
 @ActiveProfiles("test")
 class ChatHistoryServiceTest {
 

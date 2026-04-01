@@ -11,8 +11,9 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **Streaming responses** — bot edits its message in real-time as tokens arrive
 - **Per-user model selection** — each user can switch GPT models via `/model`
 - **Rate limiting** — configurable per-user request limit (sliding window)
+- **Message encryption** — AES-256-GCM encryption for chat messages in DB (optional)
 - **Auto-cleanup** — old messages purged from DB after 30 days
-- Per-user conversation history (configurable pool size)
+- Per-user conversation history persisted in DB (survives restarts)
 - Group chat support (mention the bot by name)
 - Whitelist-based access control (by user ID, username, or group name)
 - **Prompt injection protection** — blocks known LLM manipulation patterns
@@ -84,6 +85,23 @@ export OPENAI_APIKEY=your-openai-api-key
 
 Note: when running without Docker, you need a PostgreSQL instance running separately.
 
+### 4. Enable message encryption (optional)
+
+Generate a 256-bit key and add it to `.env`:
+
+```bash
+openssl rand -base64 32
+```
+
+```
+ENCRYPTION_KEY=your-generated-key-here
+```
+
+Without this key the bot works normally but stores messages in plaintext.
+Enabling encryption on an existing database is safe — old plaintext messages remain readable.
+
+**Important:** do not lose the key. Messages encrypted with a lost key cannot be recovered.
+
 ## Configuration
 
 All settings are in `src/main/resources/application.properties`:
@@ -93,12 +111,13 @@ All settings are in `src/main/resources/application.properties`:
 | `openai.model`                 | Default OpenAI model                 | `gpt-4o-mini`         |
 | `openai.temperature`           | Response creativity (0.0 - 1.0)      | `0.7`                 |
 | `openai.maxtokens`             | Max tokens per response              | `3000`                |
-| `openai.max.message.pool.size` | Messages kept in user context        | `7`                   |
+| `openai.max.message.pool.size` | Recent messages loaded from DB as context | `7`                   |
 | `openai.allowed.models`        | Comma-separated allowed models       | `gpt-4o-mini,gpt-4o,gpt-4-turbo,gpt-3.5-turbo` |
 | `bot.whitelist`                | Allowed user IDs/usernames (empty = all) | empty             |
 | `bot.rate.limit`               | Max requests per user per window     | `10`                  |
 | `bot.rate.window.seconds`      | Rate limit window in seconds         | `60`                  |
 | `bot.stream.enabled`           | Enable streaming responses           | `true`                |
+| `encryption.key`               | AES-256 key, base64 (empty = disabled) | empty               |
 | `bot.prompt.max.length`        | Max custom prompt length             | `500`                 |
 | `bot.image.max.size.mb`        | Max image size in MB                 | `10`                  |
 
@@ -110,6 +129,7 @@ All settings are in `src/main/resources/application.properties`:
 - Image downloads restricted to HTTPS from `api.telegram.org` only
 - Image type and size validation before processing
 - Per-user rate limiting prevents abuse and budget overruns
+- Optional AES-256-GCM encryption for chat messages in DB (protects against DB dump leaks)
 - Automatic cleanup of old chat history (30-day retention)
 - Whitelist support for restricting bot access
 
