@@ -5,12 +5,14 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import tgbotgpt.model.entity.ChatMessage;
 
+import org.springframework.data.domain.Pageable;
+
 import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
 
-    List<ChatMessage> findTop20ByUserIdOrderByCreatedAtDesc(Long userId);
+    List<ChatMessage> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
 
     void deleteByUserId(Long userId);
 

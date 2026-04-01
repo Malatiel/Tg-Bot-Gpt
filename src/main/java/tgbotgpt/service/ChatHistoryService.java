@@ -1,6 +1,7 @@
 package tgbotgpt.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,8 +29,8 @@ public class ChatHistoryService {
         messageRepository.save(msg);
     }
 
-    public List<ChatMessage> getRecentMessages(Long userId) {
-        List<ChatMessage> messages = messageRepository.findTop20ByUserIdOrderByCreatedAtDesc(userId);
+    public List<ChatMessage> getRecentMessages(Long userId, int limit) {
+        List<ChatMessage> messages = messageRepository.findByUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, limit));
         return messages.reversed();
     }
 

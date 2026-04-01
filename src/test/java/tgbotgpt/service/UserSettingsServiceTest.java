@@ -158,4 +158,68 @@ class UserSettingsServiceTest {
         assertEquals(2, service.getUserMessages(1L));
         assertEquals(0, service.getUserMessages(999L));
     }
+
+    @Test
+    void shouldResetPromptWhenBlankInput() {
+        service.setCustomPrompt(1L, "Some prompt");
+        String result = service.setCustomPrompt(1L, "   ");
+        assertEquals("Prompt reset to default.", result);
+        assertEquals("Default prompt", service.getSystemPrompt(1L));
+    }
+
+    @Test
+    void shouldResetPromptWhenNullInput() {
+        service.setCustomPrompt(1L, "Some prompt");
+        String result = service.setCustomPrompt(1L, null);
+        assertEquals("Prompt reset to default.", result);
+    }
+
+    @Test
+    void shouldAcceptPromptAtExactMaxLength() {
+        String exact = "x".repeat(500);
+        String result = service.setCustomPrompt(1L, exact);
+        assertEquals("Custom prompt set.", result);
+        assertEquals(exact, service.getSystemPrompt(1L));
+    }
+
+    @Test
+    void shouldRejectPromptOneOverMaxLength() {
+        String tooLong = "x".repeat(501);
+        String result = service.setCustomPrompt(1L, tooLong);
+        assertTrue(result.contains("too long"));
+    }
+
+    @Test
+    void shouldHandleControlCharsOnlyPrompt() {
+        // After sanitization, only whitespace/empty remains → treated as blank → resets
+        String result = service.setCustomPrompt(1L, "\u0000\u0007\u001B");
+        assertEquals("Prompt reset to default.", result);
+    }
+
+    @Test
+    void shouldUpdateExistingUserPartially() {
+        service.getOrCreateUser(1L, "original", "OrigFirst");
+        BotUser updated = service.getOrCreateUser(1L, null, "NewFirst");
+        assertEquals("original", updated.getUsername());
+        assertEquals("NewFirst", updated.getFirstName());
+    }
+
+    @Test
+    void shouldNotOverwriteUsernameWithNull() {
+        service.getOrCreateUser(1L, "keep_me", "First");
+        BotUser user = service.getOrCreateUser(1L, null, null);
+        assertEquals("keep_me", user.getUsername());
+    }
+
+    @Test
+    void shouldReturnFalseForEmptyModelString() {
+        assertFalse(service.setModel(1L, ""));
+    }
+
+    @Test
+    void shouldNotDetectInjectionInNormalText() {
+        assertFalse(service.containsInjection("Tell me about ignoring errors in Python"));
+        assertFalse(service.containsInjection("How do I forget previous commits in git?"));
+        assertFalse(service.containsInjection("The system works great"));
+    }
 }

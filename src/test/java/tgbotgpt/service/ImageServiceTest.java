@@ -70,4 +70,43 @@ class ImageServiceTest {
         String result = imageService.downloadAndEncode("https://api.telegram.org/file/bot/test.svg", "image/svg+xml");
         assertNull(result);
     }
+
+    @Test
+    void shouldGuessMimeTypeCaseInsensitive() {
+        assertEquals("image/png", imageService.guessMimeType("PHOTO.PNG"));
+        assertEquals("image/gif", imageService.guessMimeType("ANIM.GIF"));
+        assertEquals("image/webp", imageService.guessMimeType("file.WEBP"));
+    }
+
+    @Test
+    void shouldGuessMimeTypeWithMultipleDots() {
+        assertEquals("image/png", imageService.guessMimeType("photo.backup.png"));
+        assertEquals("image/jpeg", imageService.guessMimeType("my.file.name.jpg"));
+    }
+
+    @Test
+    void shouldDefaultToJpegForUnknownExtension() {
+        assertEquals("image/jpeg", imageService.guessMimeType("photo.bmp"));
+        assertEquals("image/jpeg", imageService.guessMimeType("noextension"));
+    }
+
+    @Test
+    void shouldRejectInvalidUrl() {
+        String result = imageService.downloadAndEncode("not-a-url", "image/jpeg");
+        assertNull(result);
+    }
+
+    @Test
+    void shouldAllowAllConfiguredTypes() {
+        assertTrue(imageService.isAllowedType("image/jpeg"));
+        assertTrue(imageService.isAllowedType("image/png"));
+        assertTrue(imageService.isAllowedType("image/gif"));
+        assertTrue(imageService.isAllowedType("image/webp"));
+    }
+
+    @Test
+    void shouldBeCaseInsensitiveOnMimeType() {
+        assertTrue(imageService.isAllowedType("IMAGE/JPEG"));
+        assertTrue(imageService.isAllowedType("Image/Png"));
+    }
 }

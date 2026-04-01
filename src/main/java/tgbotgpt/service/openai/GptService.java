@@ -14,11 +14,11 @@ import tgbotgpt.model.dto.response.ChatResponse;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
-import tgbotgpt.utils.MessageLog;
 import tgbotgpt.utils.UpdateUtils;
 
+import tgbotgpt.model.entity.ChatMessage;
+
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -47,7 +47,6 @@ public class GptService {
 
     private Set<String> whiteSet;
     private List<String> examples;
-    private final Map<Long, MessageLog<Message>> userContext = new ConcurrentHashMap<>();
     private final AtomicInteger ntokens = new AtomicInteger(0);
 
     public GptService(OpenAIApiClient client, Environment env, RateLimiter rateLimiter,
@@ -146,11 +145,6 @@ public class GptService {
             ntokens.addAndGet(tokens);
 
             String content = response.getChoices().get(0).getMessage().getContentAsString();
-
-            if (UpdateUtils.isPrivate(update)) {
-                addAssistantMessage(update, content);
-            }
-
             persistExchange(userId, userText, content, tokens);
             return content;
         } catch (Exception e) {
@@ -226,12 +220,7 @@ public class GptService {
                         return content != null ? content : "";
                     })
                     .filter(s -> !s.isEmpty())
-                    .doOnComplete(() -> {
-                        if (UpdateUtils.isPrivate(update) && !fullResponse.isEmpty()) {
-                            addAssistantMessage(update, fullResponse.toString());
-                        }
-                        persistExchange(userId, userText, fullResponse.toString(), null);
-                    })
+                    .doOnComplete(() -> persistExchange(userId, userText, fullResponse.toString(), null))
                     .doOnError(e -> log.error("Stream error: ", e));
         } catch (Exception e) {
             log.error("Error: ", e);
@@ -257,7 +246,6 @@ public class GptService {
     public String resetUserContext(Update update) {
         if (UpdateUtils.isPrivate(update)) {
             Long userId = update.message().from().id();
-            userContext.remove(userId);
             chatHistory.clearHistory(userId);
             return "User context has been reset for " + update.message().from().firstName();
         } else {
@@ -314,25 +302,26 @@ public class GptService {
         List<Message> messages = new ArrayList<>();
         messages.add(createSystemMessage(systemPrompt));
 
-        if (UpdateUtils.isPrivate(update)) {
-            MessageLog<Message> log = userContext.computeIfAbsent(userId, id -> {
-                MessageLog<Message> newLog = new MessageLog<>(maxMessagePoolSize);
-                if (!examples.isEmpty()) {
-                    newLog.addAll(getExamples());
-                }
-                return newLog;
-            });
-            addUserMessage(update);
-            messages.addAll(log);
-        } else {
-            if (!examples.isEmpty()) {
-                messages.addAll(getExamples());
-            }
-            Message userMessage = new Message();
-            userMessage.setRole("user");
-            userMessage.setContent(update.message().text());
-            messages.add(userMessage);
+        if (!examples.isEmpty()) {
+            messages.addAll(getExamples());
         }
+
+        if (UpdateUtils.isPrivate(update)) {
+            // Load conversation history from DB
+            List<ChatMessage> history = chatHistory.getRecentMessages(userId, maxMessagePoolSize);
+            for (ChatMessage cm : history) {
+                Message msg = new Message();
+                msg.setRole(cm.getRole());
+                msg.setContent(cm.getContent());
+                messages.add(msg);
+            }
+        }
+
+        // Add current user message
+        Message userMessage = new Message();
+        userMessage.setRole("user");
+        userMessage.setContent(update.message().text());
+        messages.add(userMessage);
 
         chatRequest.setMessages(messages);
         return chatRequest;
@@ -369,20 +358,6 @@ public class GptService {
         message.setRole(parts[0].toLowerCase());
         message.setContent(parts[1]);
         return message;
-    }
-
-    private void addUserMessage(Update update) {
-        Message userMessage = new Message();
-        userMessage.setRole("user");
-        userMessage.setContent(update.message().text());
-        userContext.get(update.message().from().id()).add(userMessage);
-    }
-
-    private void addAssistantMessage(Update update, String content) {
-        Message assistantMessage = new Message();
-        assistantMessage.setRole("assistant");
-        assistantMessage.setContent(content);
-        userContext.get(update.message().from().id()).add(assistantMessage);
     }
 
     boolean checkPermission(Update update) {

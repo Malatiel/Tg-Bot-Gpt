@@ -55,6 +55,9 @@ class GptServiceTest {
         ReflectionTestUtils.setField(gptService, "whiteList", null);
         ReflectionTestUtils.setField(gptService, "whiteSet", Collections.emptySet());
         ReflectionTestUtils.setField(gptService, "examples", Collections.emptyList());
+
+        // Default: empty history from DB
+        lenient().when(chatHistory.getRecentMessages(anyLong(), anyInt())).thenReturn(Collections.emptyList());
     }
 
     @Test
@@ -235,6 +238,148 @@ class GptServiceTest {
 
         assertEquals("Sorry, you are not in the access list.", result);
         verify(client, never()).getCompletion(any());
+    }
+
+    @Test
+    void shouldLoadHistoryFromDbForPrivateChat() {
+        Update update = createPrivateUpdate(1L, "New message");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("New message")).thenReturn(false);
+
+        // Simulate existing history in DB
+        tgbotgpt.model.entity.ChatMessage prev1 = new tgbotgpt.model.entity.ChatMessage(1L, "user", "Hi", null);
+        tgbotgpt.model.entity.ChatMessage prev2 = new tgbotgpt.model.entity.ChatMessage(1L, "assistant", "Hello!", 5);
+        when(chatHistory.getRecentMessages(1L, 7)).thenReturn(List.of(prev1, prev2));
+
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("Reply")));
+
+        gptService.sendMessage(update);
+
+        // Verify the request includes history + current message
+        verify(client).getCompletion(argThat(req -> {
+            List<Message> msgs = req.getMessages();
+            // system + 2 history + current user message = 4
+            return msgs.size() == 4
+                    && "system".equals(msgs.get(0).getRole())
+                    && "user".equals(msgs.get(1).getRole())
+                    && "Hi".equals(msgs.get(1).getContentAsString())
+                    && "assistant".equals(msgs.get(2).getRole())
+                    && "user".equals(msgs.get(3).getRole())
+                    && "New message".equals(msgs.get(3).getContentAsString());
+        }));
+    }
+
+    @Test
+    void shouldResetContextInGroupChat() {
+        Update update = createGroupUpdate(1L, "/reset");
+
+        String result = gptService.resetUserContext(update);
+
+        assertEquals("Nothing to reset in a group chat.", result);
+        verify(chatHistory, never()).clearHistory(anyLong());
+    }
+
+    @Test
+    void shouldFallbackVisionModelForNonGpt4o() {
+        Update update = createPrivateUpdate(1L, null);
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-3.5-turbo");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection(any())).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("A dog")));
+
+        gptService.sendVisionMessage(update, "base64", "image/jpeg", "Describe");
+
+        verify(client).getCompletion(argThat(req -> "gpt-4o-mini".equals(req.getModel())));
+    }
+
+    @Test
+    void shouldKeepGpt4oForVision() {
+        Update update = createPrivateUpdate(1L, null);
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection(any())).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("ok")));
+
+        gptService.sendVisionMessage(update, "base64", "image/jpeg", "Describe");
+
+        verify(client).getCompletion(argThat(req -> "gpt-4o".equals(req.getModel())));
+    }
+
+    @Test
+    void shouldSendVisionWithNullCaption() {
+        Update update = createPrivateUpdate(1L, null);
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection(null)).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("A photo")));
+
+        String result = gptService.sendVisionMessage(update, "base64", "image/jpeg", null);
+
+        assertEquals("A photo", result);
+        verify(chatHistory).saveMessage(eq(1L), eq("user"), eq("[image] "), any());
+    }
+
+    @Test
+    void shouldNotLoadHistoryForGroupChat() {
+        Update update = createGroupUpdate(1L, "Hello group");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("Hello group")).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("Hi")));
+
+        gptService.sendMessage(update);
+
+        verify(chatHistory, never()).getRecentMessages(anyLong(), anyInt());
+        // system + user = 2 messages (no history loaded)
+        verify(client).getCompletion(argThat(req -> req.getMessages().size() == 2));
+    }
+
+    @Test
+    void shouldAllowByGroupNameInWhitelist() {
+        ReflectionTestUtils.setField(gptService, "whiteSet", java.util.Set.of("mygroup"));
+        Update update = createGroupUpdate(1L, "Hello");
+        // set group title
+        lenient().when(update.message().chat().title()).thenReturn("MyGroup");
+
+        assertTrue(gptService.checkPermission(update));
+    }
+
+    @Test
+    void shouldAllowByUserIdInWhitelist() {
+        ReflectionTestUtils.setField(gptService, "whiteSet", java.util.Set.of("1"));
+        Update update = createPrivateUpdate(1L, "Hello");
+
+        assertTrue(gptService.checkPermission(update));
+    }
+
+    private Update createGroupUpdate(Long userId, String text) {
+        Update update = mock(Update.class);
+        com.pengrad.telegrambot.model.Message message = mock(com.pengrad.telegrambot.model.Message.class);
+        User user = mock(User.class);
+        Chat chat = mock(Chat.class);
+
+        lenient().when(update.message()).thenReturn(message);
+        lenient().when(message.text()).thenReturn(text);
+        lenient().when(message.from()).thenReturn(user);
+        lenient().when(message.chat()).thenReturn(chat);
+        lenient().when(user.id()).thenReturn(userId);
+        lenient().when(user.firstName()).thenReturn("TestUser");
+        lenient().when(user.username()).thenReturn("testuser");
+        lenient().when(chat.type()).thenReturn(Chat.Type.group);
+        lenient().when(chat.title()).thenReturn(null);
+
+        return update;
     }
 
     private Update createPrivateUpdate(Long userId, String text) {

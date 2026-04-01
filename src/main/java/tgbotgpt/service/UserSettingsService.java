@@ -73,6 +73,9 @@ public class UserSettingsService {
         }
 
         String sanitized = sanitizePrompt(prompt);
+        if (sanitized.isBlank()) {
+            return resetPrompt(userId);
+        }
         if (sanitized.length() > promptMaxLength) {
             return String.format("Prompt too long. Max %d characters, yours: %d", promptMaxLength, sanitized.length());
         }

@@ -99,4 +99,48 @@ class RateLimiterTest {
         assertTrue(seconds > 0);
         assertTrue(seconds <= 60);
     }
+
+    @Test
+    void shouldReturnZeroRemainingWhenExactlyAtLimit() {
+        Long userId = 1L;
+        rateLimiter.isAllowed(userId);
+        rateLimiter.isAllowed(userId);
+        rateLimiter.isAllowed(userId);
+
+        assertEquals(0, rateLimiter.getRemainingRequests(userId));
+    }
+
+    @Test
+    void shouldNeverReturnNegativeRemaining() {
+        Long userId = 1L;
+        // Exhaust limit
+        for (int i = 0; i < 5; i++) {
+            rateLimiter.isAllowed(userId);
+        }
+
+        assertTrue(rateLimiter.getRemainingRequests(userId) >= 0);
+    }
+
+    @Test
+    void shouldReturnMaxRequestsForNewUserRemaining() {
+        assertEquals(3, rateLimiter.getRemainingRequests(999L));
+    }
+
+    @Test
+    void shouldReturnZeroSecondsForUserWithExpiredWindow() {
+        RateLimiter shortWindow = new RateLimiter();
+        ReflectionTestUtils.setField(shortWindow, "maxRequests", 1);
+        ReflectionTestUtils.setField(shortWindow, "windowSeconds", 1);
+
+        Long userId = 1L;
+        shortWindow.isAllowed(userId);
+
+        try {
+            Thread.sleep(1100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        assertEquals(0, shortWindow.getSecondsUntilReset(userId));
+    }
 }
