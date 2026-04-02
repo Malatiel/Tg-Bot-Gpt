@@ -1,91 +1,129 @@
-/**
- * Client that interacts with the OpenAI API to get chat completions.
- */
 package tgbotgpt.clients;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 import tgbotgpt.model.dto.request.ChatRequest;
 import tgbotgpt.model.dto.response.ChatResponse;
 import tgbotgpt.model.dto.response.StreamChunk;
 
+import java.io.IOException;
+import java.time.Duration;
+
 @Service
 public class OpenAIApiClient {
 
+    private static final ParameterizedTypeReference<ServerSentEvent<String>> SSE_TYPE =
+            new ParameterizedTypeReference<>() {
+            };
+
     @Value("${openai.apikey}")
     private String apiKey;
+
     @Value("${openai.url}")
     private String url;
-    private WebClient webClient;
-    private final ObjectMapper mapper = new ObjectMapper();
 
-    /**
-     * Initializes the WebClient with base URL and authorization header.
-     */
-    @PostConstruct
-    private void init() {
-        this.webClient = WebClient.builder()
+    @Value("${openai.request.timeout.seconds:30}")
+    private long timeoutSeconds;
+
+    @Value("${openai.retry.max-attempts:2}")
+    private long retryMaxAttempts;
+
+    @Value("${openai.retry.delay.ms:500}")
+    private long retryDelayMs;
+
+    private final WebClient.Builder webClientBuilder;
+    private final ObjectMapper mapper;
+
+    public OpenAIApiClient(WebClient.Builder webClientBuilder, ObjectMapper mapper) {
+        this.webClientBuilder = webClientBuilder;
+        this.mapper = mapper;
+    }
+
+    public Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
+        return webClient().post()
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(chatRequest)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, response -> mapError(response.statusCode(), response.bodyToMono(String.class)))
+                .bodyToMono(ChatResponse.class)
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .onErrorMap(this::mapTransportError)
+                .retryWhen(retrySpec());
+    }
+
+    public Flux<StreamChunk> getCompletionStream(ChatRequest chatRequest) {
+        chatRequest.setStream(true);
+
+        return webClient().post()
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .bodyValue(chatRequest)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, response -> mapError(response.statusCode(), response.bodyToMono(String.class)))
+                .bodyToFlux(SSE_TYPE)
+                .filter(event -> event.data() != null && !"[DONE]".equals(event.data()))
+                .map(event -> parseChunk(event.data()))
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .onErrorMap(this::mapTransportError)
+                .retryWhen(retrySpec());
+    }
+
+    private WebClient webClient() {
+        return webClientBuilder
                 .baseUrl(url)
                 .defaultHeader("Content-Type", "application/json")
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .build();
     }
 
-    /**
-     * Sends a chat request to the OpenAI API and returns a reactive Mono response.
-     *
-     * @param chatRequest the chat request to send.
-     * @return a Mono containing the chat response from OpenAI API.
-     */
-    public Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
-        String requestBody;
+    private StreamChunk parseChunk(String data) {
         try {
-            requestBody = mapper.writeValueAsString(chatRequest);
-        } catch (Exception e) {
-            return Mono.error(new RuntimeException("Failed to serialize request", e));
+            return mapper.readValue(data, StreamChunk.class);
+        } catch (IOException e) {
+            throw new OpenAiClientException("Failed to parse stream chunk", e, false);
         }
-
-        return webClient.post()
-                .bodyValue(requestBody)
-                .retrieve()
-                .onStatus(
-                        status -> !status.is2xxSuccessful(),
-                        clientResponse -> Mono.error(new RuntimeException("Unexpected status code: " + clientResponse.statusCode()))
-                )
-                .bodyToMono(ChatResponse.class);
     }
 
-    /**
-     * Sends a streaming chat request to the OpenAI API.
-     * Returns a Flux of StreamChunk, each containing a delta of the response.
-     */
-    public Flux<StreamChunk> getCompletionStream(ChatRequest chatRequest) {
-        chatRequest.setStream(true);
+    private Mono<? extends Throwable> mapError(HttpStatusCode statusCode, Mono<String> bodyMono) {
+        return bodyMono.defaultIfEmpty("")
+                .map(body -> new OpenAiClientException(buildErrorMessage(statusCode, body), isRetryableStatus(statusCode.value())));
+    }
 
-        String requestBody;
-        try {
-            requestBody = mapper.writeValueAsString(chatRequest);
-        } catch (Exception e) {
-            return Flux.error(new RuntimeException("Failed to serialize request", e));
+    private String buildErrorMessage(HttpStatusCode statusCode, String body) {
+        String normalizedBody = body == null ? "" : body.trim();
+        if (normalizedBody.isEmpty()) {
+            return "OpenAI API request failed with status " + statusCode.value();
         }
+        return "OpenAI API request failed with status " + statusCode.value() + ": " + normalizedBody;
+    }
 
-        return webClient.post()
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToFlux(ServerSentEvent.class)
-                .filter(event -> event.data() != null && !"[DONE]".equals(event.data()))
-                .map(event -> {
-                    try {
-                        return mapper.readValue((String) event.data(), StreamChunk.class);
-                    } catch (Exception e) {
-                        throw new RuntimeException("Failed to parse stream chunk", e);
-                    }
-                });
+    private Throwable mapTransportError(Throwable error) {
+        if (error instanceof OpenAiClientException) {
+            return error;
+        }
+        return new OpenAiClientException("OpenAI API request failed", error, true);
+    }
+
+    private Retry retrySpec() {
+        return Retry.backoff(retryMaxAttempts, Duration.ofMillis(retryDelayMs))
+                .filter(this::isRetryable)
+                .onRetryExhaustedThrow((spec, signal) -> signal.failure());
+    }
+
+    private boolean isRetryable(Throwable error) {
+        return error instanceof OpenAiClientException exception && exception.isRetryable();
+    }
+
+    private boolean isRetryableStatus(int statusCode) {
+        return statusCode == 429 || statusCode >= 500;
     }
 }

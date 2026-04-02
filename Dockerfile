@@ -1,17 +1,14 @@
-#FROM openjdk:22-jdk-slim
-#VOLUME /tmp
-#COPY target/Tg-Bot-Gpt-0.0.1-SNAPSHOT.jar app.jar
-#ENTRYPOINT ["java", "-jar", "/app.jar"]
+FROM maven:3.9.9-eclipse-temurin-22 AS build
 
+WORKDIR /workspace
+COPY pom.xml .
+COPY .mvn .mvn
+COPY mvnw mvnw
+COPY mvnw.cmd mvnw.cmd
+COPY src src
+RUN chmod +x mvnw && ./mvnw -q -DskipTests package
 
-# Используем официальный образ OpenJDK
-FROM openjdk:22-jdk-slim
-
-# Устанавливаем рабочую директорию
+FROM eclipse-temurin:22-jre
 WORKDIR /app
-
-# Копируем jar-файл приложения
-COPY target/Tg-Bot-Gpt-0.0.1-SNAPSHOT.jar app.jar
-
-# Указываем команду для запуска приложения
+COPY --from=build /workspace/target/Tg-Bot-Gpt-0.0.1-SNAPSHOT.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]

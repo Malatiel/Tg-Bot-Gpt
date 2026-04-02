@@ -64,32 +64,32 @@ class DocumentServiceTest {
 
     @Test
     void shouldRejectNonHttpsUrl() {
-        String result = documentService.extractText("http://example.com/file.pdf", "file.pdf");
-        assertNull(result);
+        DocumentExtractionResult result = documentService.extractText("http://example.com/file.pdf", "file.pdf");
+        assertEquals(DocumentExtractionResult.Status.INVALID_SOURCE, result.status());
     }
 
     @Test
     void shouldRejectNonTelegramUrl() {
-        String result = documentService.extractText("https://evil.com/file.pdf", "file.pdf");
-        assertNull(result);
+        DocumentExtractionResult result = documentService.extractText("https://evil.com/file.pdf", "file.pdf");
+        assertEquals(DocumentExtractionResult.Status.INVALID_SOURCE, result.status());
     }
 
     @Test
     void shouldRejectTelegramLookalikeSubdomain() {
-        String result = documentService.extractText("https://cdn.api.telegram.org.evil.com/file.pdf", "file.pdf");
-        assertNull(result);
+        DocumentExtractionResult result = documentService.extractText("https://cdn.api.telegram.org.evil.com/file.pdf", "file.pdf");
+        assertEquals(DocumentExtractionResult.Status.INVALID_SOURCE, result.status());
     }
 
     @Test
     void shouldRejectUnsupportedExtensionInExtract() {
-        String result = documentService.extractText("https://api.telegram.org/file/bot/test.docx", "test.docx");
-        assertNull(result);
+        DocumentExtractionResult result = documentService.extractText("https://api.telegram.org/file/bot/test.docx", "test.docx");
+        assertEquals(DocumentExtractionResult.Status.UNSUPPORTED_TYPE, result.status());
     }
 
     @Test
     void shouldRejectInvalidUrl() {
-        String result = documentService.extractText("not-a-url", "test.txt");
-        assertNull(result);
+        DocumentExtractionResult result = documentService.extractText("not-a-url", "test.txt");
+        assertEquals(DocumentExtractionResult.Status.INVALID_SOURCE, result.status());
     }
 
     @Test

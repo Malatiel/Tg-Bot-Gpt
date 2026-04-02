@@ -19,14 +19,10 @@ public class ImageService {
     @Value("#{'${bot.image.allowed.types:image/jpeg,image/png,image/gif,image/webp}'.split(',')}")
     private Set<String> allowedTypes;
 
-    /**
-     * Downloads an image from a URL, validates size and type, returns base64.
-     * Returns null if validation fails.
-     */
-    public String downloadAndEncode(String fileUrl, String mimeType) {
+    public ImageDownloadResult downloadAndEncode(String fileUrl, String mimeType) {
         if (!isAllowedType(mimeType)) {
             log.warn("Rejected image type: {}", mimeType);
-            return null;
+            return ImageDownloadResult.unsupportedType();
         }
 
         try {
@@ -34,24 +30,24 @@ public class ImageService {
             // Only allow HTTPS URLs from Telegram API
             if (!"https".equals(uri.getScheme())) {
                 log.warn("Rejected non-HTTPS image URL");
-                return null;
+                return ImageDownloadResult.invalidSource();
             }
             if (!uri.getHost().endsWith("api.telegram.org")) {
                 log.warn("Rejected non-Telegram image URL: {}", uri.getHost());
-                return null;
+                return ImageDownloadResult.invalidSource();
             }
 
             try (InputStream in = uri.toURL().openStream()) {
                 byte[] data = in.readNBytes(maxSizeMb * 1024 * 1024 + 1);
                 if (data.length > maxSizeMb * 1024 * 1024) {
                     log.warn("Image too large: {} bytes", data.length);
-                    return null;
+                    return ImageDownloadResult.tooLarge();
                 }
-                return Base64.getEncoder().encodeToString(data);
+                return ImageDownloadResult.success(Base64.getEncoder().encodeToString(data));
             }
         } catch (Exception e) {
             log.error("Failed to download image: ", e);
-            return null;
+            return ImageDownloadResult.unreadable();
         }
     }
 

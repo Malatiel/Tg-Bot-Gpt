@@ -55,20 +55,20 @@ class ImageServiceTest {
 
     @Test
     void shouldRejectNonHttpsUrl() {
-        String result = imageService.downloadAndEncode("http://example.com/image.jpg", "image/jpeg");
-        assertNull(result);
+        ImageDownloadResult result = imageService.downloadAndEncode("http://example.com/image.jpg", "image/jpeg");
+        assertEquals(ImageDownloadResult.Status.INVALID_SOURCE, result.status());
     }
 
     @Test
     void shouldRejectNonTelegramUrl() {
-        String result = imageService.downloadAndEncode("https://evil.com/image.jpg", "image/jpeg");
-        assertNull(result);
+        ImageDownloadResult result = imageService.downloadAndEncode("https://evil.com/image.jpg", "image/jpeg");
+        assertEquals(ImageDownloadResult.Status.INVALID_SOURCE, result.status());
     }
 
     @Test
     void shouldRejectDisallowedMimeType() {
-        String result = imageService.downloadAndEncode("https://api.telegram.org/file/bot/test.svg", "image/svg+xml");
-        assertNull(result);
+        ImageDownloadResult result = imageService.downloadAndEncode("https://api.telegram.org/file/bot/test.svg", "image/svg+xml");
+        assertEquals(ImageDownloadResult.Status.UNSUPPORTED_TYPE, result.status());
     }
 
     @Test
@@ -92,8 +92,8 @@ class ImageServiceTest {
 
     @Test
     void shouldRejectInvalidUrl() {
-        String result = imageService.downloadAndEncode("not-a-url", "image/jpeg");
-        assertNull(result);
+        ImageDownloadResult result = imageService.downloadAndEncode("not-a-url", "image/jpeg");
+        assertEquals(ImageDownloadResult.Status.INVALID_SOURCE, result.status());
     }
 
     @Test

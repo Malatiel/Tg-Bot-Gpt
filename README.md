@@ -1,13 +1,13 @@
 # Telegram Bot GPT
 
-A Telegram bot powered by the OpenAI API. Supports private and group chats with per-user conversation context, persistent storage, and image analysis.
+A Telegram bot powered by the OpenAI API. Supports private and group chats with per-user conversation context, persistent storage, image analysis, and document analysis.
 
 ## Features
 
 - Chat with OpenAI GPT models via Telegram
 - **PostgreSQL persistence** — user settings, chat history, and usage stats saved to DB
 - **Custom system prompts** — each user can personalize bot behavior via `/prompt`
-- **Image analysis** — send a photo and GPT-4o will describe/analyze it
+- **Image analysis** — send a photo and a vision-capable GPT-4o model will describe/analyze it
 - **Document analysis** — send a PDF or TXT file for GPT to analyze (with optional caption as instruction)
 - **Streaming responses** — bot edits its message in real-time as tokens arrive
 - **Per-user model selection** — each user can switch GPT models via `/model`
@@ -67,14 +67,18 @@ BOT_TOKEN=your-telegram-bot-token
 OPENAI_APIKEY=your-openai-api-key
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your-postgres-password
+POSTGRES_DB=tgbotgpt
+ENCRYPTION_KEY=optional-base64-key
 ```
+
+`.env`, `.env.local`, and other local env overrides are gitignored; only `.env.example` is meant to be committed.
 
 ### 3. Run
 
 **With Docker (recommended):**
 
 ```bash
-docker compose up
+docker compose up --build
 ```
 
 **Without Docker:**
@@ -82,6 +86,9 @@ docker compose up
 ```bash
 export BOT_TOKEN=your-telegram-bot-token
 export OPENAI_APIKEY=your-openai-api-key
+export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/tgbotgpt
+export SPRING_DATASOURCE_USERNAME=postgres
+export SPRING_DATASOURCE_PASSWORD=your-postgres-password
 ./mvnw spring-boot:run
 ```
 
@@ -122,14 +129,20 @@ All settings are in `src/main/resources/application.properties`:
 | `encryption.key`               | AES-256 key, base64 (empty = disabled) | empty               |
 | `bot.document.max.size.mb`     | Max document file size in MB         | `10`                  |
 | `bot.document.max.text.chars`  | Max extracted text chars sent to GPT | `15000`               |
+| `bot.document.max.pages`       | Max PDF pages allowed for parsing    | `50`                  |
+| `bot.document.parse.timeout.seconds` | PDF parsing timeout in seconds | `30`                  |
 | `bot.prompt.max.length`        | Max custom prompt length             | `500`                 |
 | `bot.image.max.size.mb`        | Max image size in MB                 | `10`                  |
+| `bot.image.allowed.types`      | Allowed MIME types for image analysis | `image/jpeg,image/png,image/gif,image/webp` |
+| `openai.url`                   | OpenAI Chat Completions endpoint     | `https://api.openai.com/v1/chat/completions` |
 
 ## Security
 
 - API keys and tokens are stored in `.env` (gitignored), never in source code
 - All user input (prompts, usernames) is sanitized against control characters
 - Prompt injection detection blocks known LLM attack patterns (jailbreaks, role overrides, instruction ignoring) in messages, captions, and custom prompts
+- Document downloads restricted to HTTPS from `api.telegram.org` only
+- Document type, page count, size, and parsing timeout are validated before processing
 - Image downloads restricted to HTTPS from `api.telegram.org` only
 - Image type and size validation before processing
 - Per-user rate limiting prevents abuse and budget overruns

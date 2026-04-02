@@ -32,22 +32,18 @@ public class DocumentService {
     @Value("${bot.document.parse.timeout.seconds:30}")
     private int parseTimeoutSeconds;
 
-    /**
-     * Downloads a document from Telegram and extracts its text content.
-     * Returns null if the document is too large, unsupported, or unreadable.
-     */
-    public String extractText(String fileUrl, String fileName) {
+    public DocumentExtractionResult extractText(String fileUrl, String fileName) {
         String extension = getExtension(fileName);
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
             log.warn("Unsupported document type: {}", fileName);
-            return null;
+            return DocumentExtractionResult.unsupportedType();
         }
 
         try {
             URI uri = URI.create(fileUrl);
             if (!"https".equals(uri.getScheme()) || !isTrustedTelegramHost(uri.getHost())) {
                 log.warn("Rejected non-Telegram document URL: {}", uri.getHost());
-                return null;
+                return DocumentExtractionResult.invalidSource();
             }
 
             byte[] data;
@@ -55,7 +51,7 @@ public class DocumentService {
                 data = in.readNBytes(maxSizeMb * 1024 * 1024 + 1);
                 if (data.length > maxSizeMb * 1024 * 1024) {
                     log.warn("Document too large: {} bytes", data.length);
-                    return null;
+                    return DocumentExtractionResult.tooLarge();
                 }
             }
 
@@ -66,7 +62,7 @@ public class DocumentService {
             };
 
             if (text == null || text.isBlank()) {
-                return null;
+                return DocumentExtractionResult.unreadable();
             }
 
             // Trim to max chars to avoid blowing up GPT context
@@ -74,10 +70,12 @@ public class DocumentService {
                 text = text.substring(0, maxTextChars) + "\n\n[... truncated, " + maxTextChars + " chars limit]";
             }
 
-            return text;
+            return DocumentExtractionResult.success(text);
+        } catch (DocumentParsingTimeoutException e) {
+            return DocumentExtractionResult.timeout();
         } catch (Exception e) {
             log.error("Failed to process document: ", e);
-            return null;
+            return DocumentExtractionResult.unreadable();
         }
     }
 
@@ -101,7 +99,7 @@ public class DocumentService {
         } catch (TimeoutException e) {
             future.cancel(true);
             log.warn("PDF parsing timed out after {} seconds", parseTimeoutSeconds);
-            return null;
+            throw new DocumentParsingTimeoutException();
         } catch (OutOfMemoryError e) {
             log.error("PDF parsing ran out of memory");
             return null;
@@ -126,5 +124,8 @@ public class DocumentService {
 
     private boolean isTrustedTelegramHost(String host) {
         return host != null && TELEGRAM_HOST.equalsIgnoreCase(host);
+    }
+
+    private static final class DocumentParsingTimeoutException extends RuntimeException {
     }
 }

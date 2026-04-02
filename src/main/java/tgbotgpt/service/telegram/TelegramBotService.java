@@ -15,8 +15,10 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import tgbotgpt.service.DocumentExtractionResult;
 import tgbotgpt.service.DocumentService;
 import tgbotgpt.service.ImageService;
+import tgbotgpt.service.ImageDownloadResult;
 import tgbotgpt.service.openai.GptService;
 import tgbotgpt.utils.TelegramUtils;
 import tgbotgpt.utils.UpdateUtils;
@@ -129,14 +131,14 @@ public class TelegramBotService {
         }
 
         String fileUrl = bot.getFullFilePath(fileResponse.file());
-        String text = documentService.extractText(fileUrl, fileName);
-        if (text == null) {
-            sendReply(update, "Could not read the document. It may be too large, empty, or corrupted.");
+        DocumentExtractionResult result = documentService.extractText(fileUrl, fileName);
+        if (!result.isSuccess()) {
+            sendReply(update, mapDocumentError(result.status()));
             return;
         }
 
         String caption = update.message().caption();
-        String response = gptService.sendDocumentMessage(update, text, caption);
+        String response = gptService.sendDocumentMessage(update, result.text(), caption);
         sendLongReply(update, response);
     }
 
@@ -157,14 +159,14 @@ public class TelegramBotService {
         String fileUrl = bot.getFullFilePath(fileResponse.file());
         String mimeType = imageService.guessMimeType(filePath);
 
-        String base64 = imageService.downloadAndEncode(fileUrl, mimeType);
-        if (base64 == null) {
-            sendReply(update, "Image too large or unsupported format.");
+        ImageDownloadResult result = imageService.downloadAndEncode(fileUrl, mimeType);
+        if (!result.isSuccess()) {
+            sendReply(update, mapImageError(result.status()));
             return;
         }
 
         String caption = update.message().caption();
-        String response = gptService.sendVisionMessage(update, base64, mimeType, caption);
+        String response = gptService.sendVisionMessage(update, result.base64(), mimeType, caption);
         sendLongReply(update, response);
     }
 
@@ -253,6 +255,27 @@ public class TelegramBotService {
         if (!sendResponse.isOk()) {
             log.error(sendResponse.message().toString());
         }
+    }
+
+    private String mapDocumentError(DocumentExtractionResult.Status status) {
+        return switch (status) {
+            case UNSUPPORTED_TYPE -> "Unsupported file type. Supported: PDF, TXT.";
+            case TOO_LARGE -> "Document is too large.";
+            case TIMEOUT -> "Document processing timed out. Try a smaller file.";
+            case INVALID_SOURCE -> "Failed to download the document.";
+            case UNREADABLE -> "Could not read the document. It may be empty or corrupted.";
+            case SUCCESS -> throw new IllegalArgumentException("Success status should not be mapped as an error");
+        };
+    }
+
+    private String mapImageError(ImageDownloadResult.Status status) {
+        return switch (status) {
+            case UNSUPPORTED_TYPE -> "Unsupported image format.";
+            case TOO_LARGE -> "Image is too large.";
+            case INVALID_SOURCE -> "Failed to process the image.";
+            case UNREADABLE -> "Could not read the image.";
+            case SUCCESS -> throw new IllegalArgumentException("Success status should not be mapped as an error");
+        };
     }
 
     private void processCommand(Update update) {
