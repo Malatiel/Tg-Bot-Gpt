@@ -15,9 +15,13 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import tgbotgpt.service.DocumentService;
 import tgbotgpt.service.ImageService;
 import tgbotgpt.service.openai.GptService;
+import tgbotgpt.utils.TelegramUtils;
 import tgbotgpt.utils.UpdateUtils;
+
+import java.util.List;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -32,6 +36,7 @@ public class TelegramBotService {
 
     private final GptService gptService;
     private final ImageService imageService;
+    private final DocumentService documentService;
 
     @Value("${bot.token}")
     private String botToken;
@@ -45,9 +50,10 @@ public class TelegramBotService {
     private TelegramBot bot;
     private final ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
-    public TelegramBotService(GptService gptService, ImageService imageService) {
+    public TelegramBotService(GptService gptService, ImageService imageService, DocumentService documentService) {
         this.gptService = gptService;
         this.imageService = imageService;
+        this.documentService = documentService;
     }
 
     @PostConstruct
@@ -70,6 +76,14 @@ public class TelegramBotService {
 
     private void processUpdate(Update update) {
         if (update.message() == null) return;
+
+        // Handle documents
+        if (update.message().document() != null) {
+            if (UpdateUtils.isPrivate(update) || hasBotMention(update)) {
+                processDocument(update);
+            }
+            return;
+        }
 
         // Handle photos
         if (update.message().photo() != null && update.message().photo().length > 0) {
@@ -98,6 +112,34 @@ public class TelegramBotService {
         return combined.toLowerCase().contains("@" + botName.toLowerCase());
     }
 
+    private void processDocument(Update update) {
+        Document doc = update.message().document();
+        String fileName = doc.fileName();
+        log.info("{} sent a document: {}", update.message().from().firstName(), fileName);
+
+        if (!documentService.isSupported(fileName)) {
+            sendReply(update, "Unsupported file type. Supported: PDF, TXT.");
+            return;
+        }
+
+        GetFileResponse fileResponse = bot.execute(new GetFile(doc.fileId()));
+        if (!fileResponse.isOk()) {
+            sendReply(update, "Failed to download the document.");
+            return;
+        }
+
+        String fileUrl = bot.getFullFilePath(fileResponse.file());
+        String text = documentService.extractText(fileUrl, fileName);
+        if (text == null) {
+            sendReply(update, "Could not read the document. It may be too large, empty, or corrupted.");
+            return;
+        }
+
+        String caption = update.message().caption();
+        String response = gptService.sendDocumentMessage(update, text, caption);
+        sendLongReply(update, response);
+    }
+
     private void processPhoto(Update update) {
         log.info("{} sent a photo", update.message().from().firstName());
 
@@ -123,7 +165,7 @@ public class TelegramBotService {
 
         String caption = update.message().caption();
         String response = gptService.sendVisionMessage(update, base64, mimeType, caption);
-        sendReply(update, response);
+        sendLongReply(update, response);
     }
 
     private void processText(Update update) {
@@ -134,7 +176,7 @@ public class TelegramBotService {
         } else {
             String response = gptService.sendMessage(update);
             log.info("{} said ... {}", botName, response);
-            sendReply(update, response);
+            sendLongReply(update, response);
         }
     }
 
@@ -188,6 +230,13 @@ public class TelegramBotService {
             bot.execute(new EditMessageText(chatId, messageId, text));
         } catch (Exception e) {
             log.error("Failed to edit message: ", e);
+        }
+    }
+
+    private void sendLongReply(Update update, String message) {
+        List<String> parts = TelegramUtils.splitMessage(message);
+        for (String part : parts) {
+            sendReply(update, part);
         }
     }
 

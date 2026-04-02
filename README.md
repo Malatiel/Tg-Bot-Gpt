@@ -8,6 +8,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **PostgreSQL persistence** — user settings, chat history, and usage stats saved to DB
 - **Custom system prompts** — each user can personalize bot behavior via `/prompt`
 - **Image analysis** — send a photo and GPT-4o will describe/analyze it
+- **Document analysis** — send a PDF or TXT file for GPT to analyze (with optional caption as instruction)
 - **Streaming responses** — bot edits its message in real-time as tokens arrive
 - **Per-user model selection** — each user can switch GPT models via `/model`
 - **Rate limiting** — configurable per-user request limit (sliding window)
@@ -31,6 +32,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 | `/prompt <text>`   | Set a custom system prompt               |
 | `/prompt reset`    | Reset prompt to default                  |
 | *Send a photo*     | Image analysis (with optional caption)   |
+| *Send a PDF/TXT*   | Document analysis (with optional caption) |
 
 ## Tech Stack
 
@@ -118,6 +120,8 @@ All settings are in `src/main/resources/application.properties`:
 | `bot.rate.window.seconds`      | Rate limit window in seconds         | `60`                  |
 | `bot.stream.enabled`           | Enable streaming responses           | `true`                |
 | `encryption.key`               | AES-256 key, base64 (empty = disabled) | empty               |
+| `bot.document.max.size.mb`     | Max document file size in MB         | `10`                  |
+| `bot.document.max.text.chars`  | Max extracted text chars sent to GPT | `15000`               |
 | `bot.prompt.max.length`        | Max custom prompt length             | `500`                 |
 | `bot.image.max.size.mb`        | Max image size in MB                 | `10`                  |
 
