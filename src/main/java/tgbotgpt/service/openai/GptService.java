@@ -120,6 +120,8 @@ public class GptService {
         chatHistory.saveMessage(userId, "assistant", assistantText, tokens);
         if (tokens != null) {
             userSettings.recordUsage(userId, tokens);
+        } else {
+            userSettings.recordMessage(userId);
         }
     }
 
@@ -441,7 +443,7 @@ public class GptService {
             return true;
         }
 
-        log.warn("Unauthorized user: id={}, username={}", userId, username);
+        log.warn("Unauthorized user id={}", userId);
         return false;
     }
 }

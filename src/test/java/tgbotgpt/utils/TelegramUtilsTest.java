@@ -84,4 +84,20 @@ class TelegramUtilsTest {
         // Content should be fully preserved (minus trimmed leading whitespace)
         assertEquals(original, joined);
     }
+
+    @Test
+    void shouldFitMessageToTelegramLimit() {
+        String text = "a".repeat(5000);
+
+        String result = TelegramUtils.fitMessage(text);
+
+        assertEquals(TelegramUtils.MAX_MESSAGE_LENGTH, result.length());
+    }
+
+    @Test
+    void shouldKeepShortFitMessageUnchanged() {
+        String text = "Hello";
+
+        assertEquals(text, TelegramUtils.fitMessage(text));
+    }
 }

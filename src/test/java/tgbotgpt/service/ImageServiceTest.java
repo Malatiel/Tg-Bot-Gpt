@@ -17,6 +17,7 @@ class ImageServiceTest {
         imageService = new ImageService();
         ReflectionTestUtils.setField(imageService, "maxSizeMb", 10);
         ReflectionTestUtils.setField(imageService, "allowedTypes", Set.of("image/jpeg", "image/png", "image/gif", "image/webp"));
+        ReflectionTestUtils.setField(imageService, "downloadTimeoutSeconds", 15);
     }
 
     @Test
@@ -62,6 +63,12 @@ class ImageServiceTest {
     @Test
     void shouldRejectNonTelegramUrl() {
         ImageDownloadResult result = imageService.downloadAndEncode("https://evil.com/image.jpg", "image/jpeg");
+        assertEquals(ImageDownloadResult.Status.INVALID_SOURCE, result.status());
+    }
+
+    @Test
+    void shouldRejectTelegramLookalikeSubdomain() {
+        ImageDownloadResult result = imageService.downloadAndEncode("https://cdn.api.telegram.org.evil.com/image.jpg", "image/jpeg");
         assertEquals(ImageDownloadResult.Status.INVALID_SOURCE, result.status());
     }
 

@@ -27,6 +27,9 @@ public class EncryptionService {
     @Value("${encryption.key:}")
     private String keyBase64;
 
+    @Value("${encryption.required:false}")
+    private boolean encryptionRequired;
+
     private SecretKey secretKey;
     private boolean enabled;
 
@@ -34,6 +37,9 @@ public class EncryptionService {
     void init() {
         if (keyBase64 == null || keyBase64.isBlank()) {
             enabled = false;
+            if (encryptionRequired) {
+                throw new IllegalStateException("ENCRYPTION_KEY is required but not set");
+            }
             log.warn("ENCRYPTION_KEY not set — chat messages will be stored in plaintext");
             return;
         }
@@ -48,6 +54,9 @@ public class EncryptionService {
             log.info("Message encryption enabled (AES-256-GCM)");
         } catch (Exception e) {
             enabled = false;
+            if (encryptionRequired) {
+                throw new IllegalStateException("Invalid ENCRYPTION_KEY", e);
+            }
             log.error("Invalid ENCRYPTION_KEY, encryption disabled: {}", e.getMessage());
         }
     }

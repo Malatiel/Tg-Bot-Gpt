@@ -117,7 +117,7 @@ public class TelegramBotService {
     private void processDocument(Update update) {
         Document doc = update.message().document();
         String fileName = doc.fileName();
-        log.info("{} sent a document: {}", update.message().from().firstName(), fileName);
+        log.info("User {} sent a document with extension {}", update.message().from().id(), documentService.getExtension(fileName));
 
         if (!documentService.isSupported(fileName)) {
             sendReply(update, "Unsupported file type. Supported: PDF, TXT.");
@@ -143,7 +143,7 @@ public class TelegramBotService {
     }
 
     private void processPhoto(Update update) {
-        log.info("{} sent a photo", update.message().from().firstName());
+        log.info("User {} sent a photo", update.message().from().id());
 
         // Get the largest photo size
         PhotoSize[] photos = update.message().photo();
@@ -171,13 +171,13 @@ public class TelegramBotService {
     }
 
     private void processText(Update update) {
-        log.info("{} said ... {}", update.message().from().firstName(), update.message().text());
+        log.info("User {} sent a text message", update.message().from().id());
 
         if (streamEnabled && UpdateUtils.isPrivate(update)) {
             processTextStream(update);
         } else {
             String response = gptService.sendMessage(update);
-            log.info("{} said ... {}", botName, response);
+            log.info("{} generated a response", botName);
             sendLongReply(update, response);
         }
     }
@@ -203,7 +203,7 @@ public class TelegramBotService {
                     accumulated.append(chunk);
                     long now = System.currentTimeMillis();
                     if (now - lastUpdateTime.get() >= STREAM_UPDATE_INTERVAL_MS) {
-                        String current = accumulated.toString();
+                        String current = TelegramUtils.fitMessage(accumulated.toString());
                         if (!current.equals(lastSent.get())) {
                             editMessage(chatId, messageId, current);
                             lastSent.set(current);
@@ -213,12 +213,21 @@ public class TelegramBotService {
                 })
                 .doOnComplete(() -> {
                     String finalText = accumulated.toString();
-                    if (!finalText.isEmpty() && !finalText.equals(lastSent.get())) {
-                        editMessage(chatId, messageId, finalText);
-                    } else if (finalText.isEmpty()) {
+                    if (finalText.isEmpty()) {
                         editMessage(chatId, messageId, "No response received.");
+                        log.info("{} generated an empty streaming response", botName);
+                        return;
                     }
-                    log.info("{} said ... {}", botName, finalText);
+
+                    List<String> parts = TelegramUtils.splitMessage(finalText);
+                    String firstPart = parts.get(0);
+                    if (!firstPart.equals(lastSent.get())) {
+                        editMessage(chatId, messageId, firstPart);
+                    }
+                    for (int i = 1; i < parts.size(); i++) {
+                        sendReply(update, parts.get(i));
+                    }
+                    log.info("{} generated a streaming response", botName);
                 })
                 .doOnError(e -> {
                     log.error("Stream error: ", e);
@@ -229,7 +238,7 @@ public class TelegramBotService {
 
     private void editMessage(long chatId, int messageId, String text) {
         try {
-            bot.execute(new EditMessageText(chatId, messageId, text));
+            bot.execute(new EditMessageText(chatId, messageId, TelegramUtils.fitMessage(text)));
         } catch (Exception e) {
             log.error("Failed to edit message: ", e);
         }
@@ -243,18 +252,28 @@ public class TelegramBotService {
     }
 
     private void sendReply(Update update, String message) {
+        SendResponse sendResponse = bot.execute(buildSendMessage(update, message, true));
+        if (!sendResponse.isOk()) {
+            log.warn("Failed to send Markdown message: {}", sendResponse.description());
+            SendResponse plainResponse = bot.execute(buildSendMessage(update, message, false));
+            if (!plainResponse.isOk()) {
+                log.error("Failed to send plain message: {}", plainResponse.description());
+            }
+        }
+    }
+
+    private SendMessage buildSendMessage(Update update, String message, boolean markdown) {
         SendMessage request = new SendMessage(update.message().chat().id(), message)
-                .parseMode(ParseMode.Markdown)
                 .disableWebPagePreview(true)
                 .disableNotification(true)
                 .replyMarkup(new ReplyKeyboardRemove());
+        if (markdown) {
+            request.parseMode(ParseMode.Markdown);
+        }
         if (!UpdateUtils.isPrivate(update)) {
             request.replyToMessageId(update.message().messageId());
         }
-        SendResponse sendResponse = bot.execute(request);
-        if (!sendResponse.isOk()) {
-            log.error(sendResponse.message().toString());
-        }
+        return request;
     }
 
     private String mapDocumentError(DocumentExtractionResult.Status status) {
@@ -301,7 +320,7 @@ public class TelegramBotService {
                 resetUserContext(update);
                 break;
             default:
-                log.warn("Unknown command: {}", update.message().text());
+                log.warn("Unknown command from user {}", update.message().from().id());
         }
     }
 

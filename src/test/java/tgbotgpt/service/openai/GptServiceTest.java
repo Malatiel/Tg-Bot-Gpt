@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
 import org.springframework.test.util.ReflectionTestUtils;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tgbotgpt.clients.OpenAIApiClient;
 import tgbotgpt.model.dto.Choice;
@@ -17,6 +18,8 @@ import tgbotgpt.model.dto.Message;
 import tgbotgpt.model.dto.Usage;
 import tgbotgpt.model.dto.request.ChatRequest;
 import tgbotgpt.model.dto.response.ChatResponse;
+import tgbotgpt.model.dto.response.StreamChoice;
+import tgbotgpt.model.dto.response.StreamChunk;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
@@ -160,6 +163,26 @@ class GptServiceTest {
 
         assertEquals(42, gptService.getNumTokens());
         verify(userSettings).recordUsage(1L, 42);
+    }
+
+    @Test
+    void shouldTrackMessageCountForStreamResponse() {
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("Hello")).thenReturn(false);
+        when(client.getCompletionStream(any(ChatRequest.class)))
+                .thenReturn(Flux.just(createStreamChunk("Hi"), createStreamChunk(" there")));
+
+        String result = String.join("", gptService.sendMessageStream(update).collectList().block());
+
+        assertEquals("Hi there", result);
+        verify(chatHistory).saveMessage(1L, "user", "Hello", null);
+        verify(chatHistory).saveMessage(1L, "assistant", "Hi there", null);
+        verify(userSettings).recordMessage(1L);
+        verify(userSettings, never()).recordUsage(anyLong(), anyInt());
     }
 
     @Test
@@ -454,5 +477,17 @@ class GptServiceTest {
         response.setUsage(usage);
 
         return response;
+    }
+
+    private StreamChunk createStreamChunk(String content) {
+        Message delta = new Message();
+        delta.setContent(content);
+
+        StreamChoice choice = new StreamChoice();
+        choice.setDelta(delta);
+
+        StreamChunk chunk = new StreamChunk();
+        chunk.setChoices(List.of(choice));
+        return chunk;
     }
 }

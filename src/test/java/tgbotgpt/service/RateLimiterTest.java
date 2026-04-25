@@ -4,6 +4,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class RateLimiterTest {
@@ -142,5 +148,36 @@ class RateLimiterTest {
         }
 
         assertEquals(0, shortWindow.getSecondsUntilReset(userId));
+    }
+
+    @Test
+    void shouldNotAllowConcurrentRequestsPastLimit() throws InterruptedException {
+        Long userId = 1L;
+        int attempts = 25;
+        ExecutorService executor = Executors.newFixedThreadPool(attempts);
+        CountDownLatch ready = new CountDownLatch(attempts);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger allowed = new AtomicInteger();
+
+        for (int i = 0; i < attempts; i++) {
+            executor.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    if (rateLimiter.isAllowed(userId)) {
+                        allowed.incrementAndGet();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+        }
+
+        assertTrue(ready.await(2, TimeUnit.SECONDS));
+        start.countDown();
+        executor.shutdown();
+        assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS));
+
+        assertEquals(3, allowed.get());
     }
 }

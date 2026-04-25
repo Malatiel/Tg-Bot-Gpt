@@ -36,6 +36,21 @@ build/
 .env
 .env.*
 !.env.example
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+### Local databases and dumps ###
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sql.gz
+*.backup
 
 ### OS ###
 .DS_Store

@@ -17,6 +17,7 @@ class DocumentServiceTest {
         ReflectionTestUtils.setField(documentService, "maxTextChars", 15000);
         ReflectionTestUtils.setField(documentService, "maxPages", 50);
         ReflectionTestUtils.setField(documentService, "parseTimeoutSeconds", 30);
+        ReflectionTestUtils.setField(documentService, "downloadTimeoutSeconds", 15);
     }
 
     @Test

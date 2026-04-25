@@ -37,4 +37,14 @@ public final class TelegramUtils {
 
         return parts;
     }
+
+    public static String fitMessage(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        if (text.length() <= MAX_MESSAGE_LENGTH) {
+            return text;
+        }
+        return text.substring(0, MAX_MESSAGE_LENGTH);
+    }
 }

@@ -128,6 +128,24 @@ class EncryptionServiceTest {
     }
 
     @Test
+    void shouldFailStartupWhenRequiredKeyIsMissing() {
+        EncryptionService service = new EncryptionService();
+        ReflectionTestUtils.setField(service, "keyBase64", "");
+        ReflectionTestUtils.setField(service, "encryptionRequired", true);
+
+        assertThrows(IllegalStateException.class, service::init);
+    }
+
+    @Test
+    void shouldFailStartupWhenRequiredKeyIsInvalid() {
+        EncryptionService service = new EncryptionService();
+        ReflectionTestUtils.setField(service, "keyBase64", "not-valid-base64!!!");
+        ReflectionTestUtils.setField(service, "encryptionRequired", true);
+
+        assertThrows(IllegalStateException.class, service::init);
+    }
+
+    @Test
     void shouldReturnPlaintextForLegacyUnencryptedData() {
         EncryptionService service = createEnabled();
 

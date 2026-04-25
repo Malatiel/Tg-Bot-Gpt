@@ -23,37 +23,28 @@ public class RateLimiter {
 
     public boolean isAllowed(Long userId) {
         long now = System.currentTimeMillis();
-        long windowStart = now - windowSeconds * 1000L;
 
         Deque<Long> timestamps = requestTimestamps.computeIfAbsent(userId, k -> new ConcurrentLinkedDeque<>());
-
-        // Remove expired timestamps
-        while (!timestamps.isEmpty() && timestamps.peekFirst() < windowStart) {
-            timestamps.pollFirst();
+        synchronized (timestamps) {
+            removeExpired(timestamps, now);
+            if (timestamps.size() >= maxRequests) {
+                return false;
+            }
+            timestamps.addLast(now);
+            return true;
         }
-
-        if (timestamps.size() >= maxRequests) {
-            return false;
-        }
-
-        timestamps.addLast(now);
-        return true;
     }
 
     public int getRemainingRequests(Long userId) {
-        long now = System.currentTimeMillis();
-        long windowStart = now - windowSeconds * 1000L;
-
         Deque<Long> timestamps = requestTimestamps.get(userId);
         if (timestamps == null) {
             return maxRequests;
         }
 
-        while (!timestamps.isEmpty() && timestamps.peekFirst() < windowStart) {
-            timestamps.pollFirst();
+        synchronized (timestamps) {
+            removeExpired(timestamps, System.currentTimeMillis());
+            return Math.max(0, maxRequests - timestamps.size());
         }
-
-        return Math.max(0, maxRequests - timestamps.size());
     }
 
     public long getSecondsUntilReset(Long userId) {
@@ -61,9 +52,23 @@ public class RateLimiter {
         if (timestamps == null || timestamps.isEmpty()) {
             return 0;
         }
-        long oldest = timestamps.peekFirst();
-        long resetAt = oldest + windowSeconds * 1000L;
-        long remaining = (resetAt - System.currentTimeMillis()) / 1000;
-        return Math.max(0, remaining);
+        synchronized (timestamps) {
+            long now = System.currentTimeMillis();
+            removeExpired(timestamps, now);
+            if (timestamps.isEmpty()) {
+                return 0;
+            }
+            long oldest = timestamps.peekFirst();
+            long resetAt = oldest + windowSeconds * 1000L;
+            long remaining = (resetAt - now) / 1000;
+            return Math.max(0, remaining);
+        }
+    }
+
+    private void removeExpired(Deque<Long> timestamps, long now) {
+        long windowStart = now - windowSeconds * 1000L;
+        while (!timestamps.isEmpty() && timestamps.peekFirst() < windowStart) {
+            timestamps.pollFirst();
+        }
     }
 }

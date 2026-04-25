@@ -119,6 +119,13 @@ public class UserSettingsService {
         userRepository.save(user);
     }
 
+    @Transactional
+    public void recordMessage(Long userId) {
+        BotUser user = getOrCreateUser(userId, null, null);
+        user.incrementMessages();
+        userRepository.save(user);
+    }
+
     public String getDefaultModel() {
         return defaultModel;
     }

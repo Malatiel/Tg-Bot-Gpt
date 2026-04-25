@@ -39,6 +39,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - Java 22
 - Spring Boot 3.3.1
 - Spring Data JPA + PostgreSQL
+- Flyway database migrations
 - Spring WebFlux (WebClient for OpenAI API)
 - [java-telegram-bot-api](https://github.com/pengrad/java-telegram-bot-api)
 - Lombok
@@ -65,10 +66,12 @@ Edit `.env`:
 ```
 BOT_TOKEN=your-telegram-bot-token
 OPENAI_APIKEY=your-openai-api-key
+SPRING_PROFILES_ACTIVE=dev
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your-postgres-password
 POSTGRES_DB=tgbotgpt
 ENCRYPTION_KEY=optional-base64-key
+ENCRYPTION_REQUIRED=false
 ```
 
 `.env`, `.env.local`, and other local env overrides are gitignored; only `.env.example` is meant to be committed.
@@ -86,6 +89,7 @@ docker compose up --build
 ```bash
 export BOT_TOKEN=your-telegram-bot-token
 export OPENAI_APIKEY=your-openai-api-key
+export SPRING_PROFILES_ACTIVE=dev
 export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/tgbotgpt
 export SPRING_DATASOURCE_USERNAME=postgres
 export SPRING_DATASOURCE_PASSWORD=your-postgres-password
@@ -93,6 +97,7 @@ export SPRING_DATASOURCE_PASSWORD=your-postgres-password
 ```
 
 Note: when running without Docker, you need a PostgreSQL instance running separately.
+The default profile is `dev`, which uses `spring.jpa.hibernate.ddl-auto=update` for local development.
 
 ### 4. Enable message encryption (optional)
 
@@ -108,15 +113,23 @@ ENCRYPTION_KEY=your-generated-key-here
 
 Without this key the bot works normally but stores messages in plaintext.
 Enabling encryption on an existing database is safe — old plaintext messages remain readable.
+Set `ENCRYPTION_REQUIRED=true` to fail startup if the key is missing or invalid.
 
 **Important:** do not lose the key. Messages encrypted with a lost key cannot be recovered.
 
+### 5. Production profile
+
+For production, run with `SPRING_PROFILES_ACTIVE=prod`. The `prod` profile runs Flyway migrations, uses `spring.jpa.hibernate.ddl-auto=validate`, requires explicit datasource environment variables, and requires encryption by default.
+
+Database migrations live in `src/main/resources/db/migration`.
+
 ## Configuration
 
-All settings are in `src/main/resources/application.properties`:
+Common settings are in `src/main/resources/application.properties`; profile-specific database settings are in `application-dev.properties` and `application-prod.properties`.
 
 | Property                       | Description                          | Default               |
 |--------------------------------|--------------------------------------|-----------------------|
+| `spring.profiles.default`      | Default Spring profile               | `dev`                 |
 | `openai.model`                 | Default OpenAI model                 | `gpt-4o-mini`         |
 | `openai.temperature`           | Response creativity (0.0 - 1.0)      | `0.7`                 |
 | `openai.maxtokens`             | Max tokens per response              | `3000`                |
@@ -127,10 +140,12 @@ All settings are in `src/main/resources/application.properties`:
 | `bot.rate.window.seconds`      | Rate limit window in seconds         | `60`                  |
 | `bot.stream.enabled`           | Enable streaming responses           | `true`                |
 | `encryption.key`               | AES-256 key, base64 (empty = disabled) | empty               |
+| `encryption.required`          | Fail startup when encryption key is missing or invalid | `false` (`true` in `prod`) |
 | `bot.document.max.size.mb`     | Max document file size in MB         | `10`                  |
 | `bot.document.max.text.chars`  | Max extracted text chars sent to GPT | `15000`               |
 | `bot.document.max.pages`       | Max PDF pages allowed for parsing    | `50`                  |
 | `bot.document.parse.timeout.seconds` | PDF parsing timeout in seconds | `30`                  |
+| `bot.file.download.timeout.seconds` | Connect/read timeout for Telegram file downloads | `15` |
 | `bot.prompt.max.length`        | Max custom prompt length             | `500`                 |
 | `bot.image.max.size.mb`        | Max image size in MB                 | `10`                  |
 | `bot.image.allowed.types`      | Allowed MIME types for image analysis | `image/jpeg,image/png,image/gif,image/webp` |
@@ -141,12 +156,14 @@ All settings are in `src/main/resources/application.properties`:
 - API keys and tokens are stored in `.env` (gitignored), never in source code
 - All user input (prompts, usernames) is sanitized against control characters
 - Prompt injection detection blocks known LLM attack patterns (jailbreaks, role overrides, instruction ignoring) in messages, captions, and custom prompts
-- Document downloads restricted to HTTPS from `api.telegram.org` only
+- Document downloads restricted to HTTPS from exact host `api.telegram.org` only
 - Document type, page count, size, and parsing timeout are validated before processing
-- Image downloads restricted to HTTPS from `api.telegram.org` only
+- Image downloads restricted to HTTPS from exact host `api.telegram.org` only
 - Image type and size validation before processing
+- Telegram file downloads use explicit network timeouts
 - Per-user rate limiting prevents abuse and budget overruns
 - Optional AES-256-GCM encryption for chat messages in DB (protects against DB dump leaks)
+- Production profile can require encryption at startup
 - Automatic cleanup of old chat history (30-day retention)
 - Whitelist support for restricting bot access
 

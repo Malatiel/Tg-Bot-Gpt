@@ -9,7 +9,11 @@ import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.*;
 
@@ -32,10 +36,13 @@ public class DocumentService {
     @Value("${bot.document.parse.timeout.seconds:30}")
     private int parseTimeoutSeconds;
 
+    @Value("${bot.file.download.timeout.seconds:15}")
+    private int downloadTimeoutSeconds;
+
     public DocumentExtractionResult extractText(String fileUrl, String fileName) {
         String extension = getExtension(fileName);
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            log.warn("Unsupported document type: {}", fileName);
+            log.warn("Unsupported document extension: {}", extension);
             return DocumentExtractionResult.unsupportedType();
         }
 
@@ -46,13 +53,10 @@ public class DocumentService {
                 return DocumentExtractionResult.invalidSource();
             }
 
-            byte[] data;
-            try (InputStream in = uri.toURL().openStream()) {
-                data = in.readNBytes(maxSizeMb * 1024 * 1024 + 1);
-                if (data.length > maxSizeMb * 1024 * 1024) {
-                    log.warn("Document too large: {} bytes", data.length);
-                    return DocumentExtractionResult.tooLarge();
-                }
+            byte[] data = download(uri, maxSizeMb * 1024 * 1024 + 1);
+            if (data.length > maxSizeMb * 1024 * 1024) {
+                log.warn("Document too large: {} bytes", data.length);
+                return DocumentExtractionResult.tooLarge();
             }
 
             String text = switch (extension) {
@@ -76,6 +80,31 @@ public class DocumentService {
         } catch (Exception e) {
             log.error("Failed to process document: ", e);
             return DocumentExtractionResult.unreadable();
+        }
+    }
+
+    private byte[] download(URI uri, int maxBytesPlusOne) throws Exception {
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(downloadTimeoutSeconds))
+                .build();
+        HttpRequest request = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(downloadTimeoutSeconds))
+                .GET()
+                .build();
+
+        HttpResponse<InputStream> response;
+        try {
+            response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("Telegram file download failed with status " + response.statusCode());
+        }
+
+        try (InputStream in = response.body()) {
+            return in.readNBytes(maxBytesPlusOne);
         }
     }
 
@@ -111,7 +140,7 @@ public class DocumentService {
         }
     }
 
-    String getExtension(String fileName) {
+    public String getExtension(String fileName) {
         if (fileName == null) return "";
         int dot = fileName.lastIndexOf('.');
         if (dot < 0) return "";
