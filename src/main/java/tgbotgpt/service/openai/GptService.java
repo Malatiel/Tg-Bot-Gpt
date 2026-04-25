@@ -8,6 +8,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import tgbotgpt.clients.OpenAIApiClient;
+import tgbotgpt.clients.OpenAIResponsesApiClient;
 import tgbotgpt.model.dto.Message;
 import tgbotgpt.model.dto.request.ChatRequest;
 import tgbotgpt.model.dto.response.ChatResponse;
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
 public class GptService {
 
     private final OpenAIApiClient client;
+    private final OpenAIResponsesApiClient responsesClient;
     private final Environment env;
     private final RateLimiter rateLimiter;
     private final UserSettingsService userSettings;
@@ -42,6 +44,8 @@ public class GptService {
     private Integer maxMessagePoolSize;
     @Value("${bot.presentation}")
     private String presentation;
+    @Value("${openai.api.mode:responses}")
+    private String apiMode;
     @Value("#{'${bot.whitelist:}'.empty ? null : '${bot.whitelist}'.split(',')}")
     private List<String> whiteList;
 
@@ -49,9 +53,10 @@ public class GptService {
     private List<String> examples;
     private final AtomicInteger ntokens = new AtomicInteger(0);
 
-    public GptService(OpenAIApiClient client, Environment env, RateLimiter rateLimiter,
+    public GptService(OpenAIApiClient client, OpenAIResponsesApiClient responsesClient, Environment env, RateLimiter rateLimiter,
                       UserSettingsService userSettings, ChatHistoryService chatHistory) {
         this.client = client;
+        this.responsesClient = responsesClient;
         this.env = env;
         this.rateLimiter = rateLimiter;
         this.userSettings = userSettings;
@@ -142,7 +147,7 @@ public class GptService {
 
         try {
             ChatRequest chatRequest = createChatRequest(update);
-            ChatResponse response = client.getCompletion(chatRequest).block();
+            ChatResponse response = getCompletion(chatRequest).block();
             int tokens = Objects.requireNonNull(response).getUsage().getTotalTokens();
             ntokens.addAndGet(tokens);
 
@@ -181,7 +186,7 @@ public class GptService {
             chatRequest.setMaxTokens(maxtokens);
             chatRequest.setMessages(List.of(createSystemMessage(systemPrompt), visionMsg));
 
-            ChatResponse response = client.getCompletion(chatRequest).block();
+            ChatResponse response = getCompletion(chatRequest).block();
             int tokens = Objects.requireNonNull(response).getUsage().getTotalTokens();
             ntokens.addAndGet(tokens);
 
@@ -210,7 +215,7 @@ public class GptService {
             ChatRequest chatRequest = createChatRequest(update);
             StringBuilder fullResponse = new StringBuilder();
 
-            return client.getCompletionStream(chatRequest)
+            return getCompletionStream(chatRequest)
                     .filter(chunk -> chunk.getChoices() != null && !chunk.getChoices().isEmpty())
                     .map(chunk -> {
                         String content = chunk.getChoices().get(0).getDelta() != null
@@ -264,7 +269,7 @@ public class GptService {
 
             chatRequest.setMessages(List.of(createSystemMessage(systemPrompt), userMsg));
 
-            ChatResponse response = client.getCompletion(chatRequest).block();
+            ChatResponse response = getCompletion(chatRequest).block();
             int tokens = Objects.requireNonNull(response).getUsage().getTotalTokens();
             ntokens.addAndGet(tokens);
 
@@ -304,7 +309,7 @@ public class GptService {
 
         try {
             ChatRequest chatRequest = createCustomChatRequest(text);
-            ChatResponse response = client.getCompletion(chatRequest).block();
+            ChatResponse response = getCompletion(chatRequest).block();
             ntokens.addAndGet(Objects.requireNonNull(response).getUsage().getTotalTokens());
             return response.getChoices().get(0).getMessage().getContentAsString();
         } catch (Exception e) {
@@ -409,6 +414,24 @@ public class GptService {
 
         chatRequest.setMessages(List.of(createSystemMessage(defaultSystemPrompt), userMessage));
         return chatRequest;
+    }
+
+    private reactor.core.publisher.Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
+        if (useResponsesApi()) {
+            return responsesClient.getCompletion(chatRequest);
+        }
+        return client.getCompletion(chatRequest);
+    }
+
+    private Flux<tgbotgpt.model.dto.response.StreamChunk> getCompletionStream(ChatRequest chatRequest) {
+        if (useResponsesApi()) {
+            return responsesClient.getCompletionStream(chatRequest);
+        }
+        return client.getCompletionStream(chatRequest);
+    }
+
+    private boolean useResponsesApi() {
+        return "responses".equalsIgnoreCase(apiMode);
     }
 
     private List<Message> getExamples() {

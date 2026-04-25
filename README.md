@@ -130,11 +130,14 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | Property                       | Description                          | Default               |
 |--------------------------------|--------------------------------------|-----------------------|
 | `spring.profiles.default`      | Default Spring profile               | `dev`                 |
+| `openai.api.mode`              | OpenAI API mode: `responses` or `chat` | `responses`          |
+| `openai.url`                   | OpenAI Chat Completions endpoint     | `https://api.openai.com/v1/chat/completions` |
+| `openai.responses.url`         | OpenAI Responses API endpoint        | `https://api.openai.com/v1/responses` |
 | `openai.model`                 | Default OpenAI model                 | `gpt-4o-mini`         |
 | `openai.temperature`           | Response creativity (0.0 - 1.0)      | `0.7`                 |
 | `openai.maxtokens`             | Max tokens per response              | `3000`                |
 | `openai.max.message.pool.size` | Recent messages loaded from DB as context | `7`                   |
-| `openai.allowed.models`        | Comma-separated allowed models       | `gpt-4o-mini,gpt-4o,gpt-4-turbo,gpt-3.5-turbo` |
+| `openai.allowed.models`        | Comma-separated allowed models       | `gpt-4o-mini,gpt-4o` |
 | `bot.whitelist`                | Allowed user IDs/usernames (empty = all) | empty             |
 | `bot.rate.limit`               | Max requests per user per window     | `10`                  |
 | `bot.rate.window.seconds`      | Rate limit window in seconds         | `60`                  |
@@ -149,7 +152,6 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `bot.prompt.max.length`        | Max custom prompt length             | `500`                 |
 | `bot.image.max.size.mb`        | Max image size in MB                 | `10`                  |
 | `bot.image.allowed.types`      | Allowed MIME types for image analysis | `image/jpeg,image/png,image/gif,image/webp` |
-| `openai.url`                   | OpenAI Chat Completions endpoint     | `https://api.openai.com/v1/chat/completions` |
 
 ## Security
 
