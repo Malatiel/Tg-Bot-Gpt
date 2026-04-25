@@ -21,6 +21,7 @@ import tgbotgpt.model.dto.request.ChatRequest;
 import tgbotgpt.model.dto.response.ChatResponse;
 import tgbotgpt.model.dto.response.StreamChoice;
 import tgbotgpt.model.dto.response.StreamChunk;
+import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
@@ -47,12 +48,14 @@ class GptServiceTest {
     private UserSettingsService userSettings;
     @Mock
     private ChatHistoryService chatHistory;
+    @Mock
+    private BotMetricsService metrics;
 
     private GptService gptService;
 
     @BeforeEach
     void setUp() {
-        gptService = new GptService(client, responsesClient, env, rateLimiter, userSettings, chatHistory);
+        gptService = new GptService(client, responsesClient, env, rateLimiter, userSettings, chatHistory, metrics);
         ReflectionTestUtils.setField(gptService, "maxtokens", 3000);
         ReflectionTestUtils.setField(gptService, "temperature", 0.7);
         ReflectionTestUtils.setField(gptService, "defaultSystemPrompt", "You are a helpful assistant.");

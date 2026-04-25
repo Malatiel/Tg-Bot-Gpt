@@ -89,7 +89,7 @@ class TelegramUtilsTest {
     void shouldFitMessageToTelegramLimit() {
         String text = "a".repeat(5000);
 
-        String result = TelegramUtils.fitMessage(text);
+        String result = TelegramUtils.truncateForEdit(text);
 
         assertEquals(TelegramUtils.MAX_MESSAGE_LENGTH, result.length());
     }
@@ -98,6 +98,6 @@ class TelegramUtilsTest {
     void shouldKeepShortFitMessageUnchanged() {
         String text = "Hello";
 
-        assertEquals(text, TelegramUtils.fitMessage(text));
+        assertEquals(text, TelegramUtils.truncateForEdit(text));
     }
 }

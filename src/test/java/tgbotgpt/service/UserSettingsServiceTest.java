@@ -49,6 +49,15 @@ class UserSettingsServiceTest {
     }
 
     @Test
+    void shouldFallbackToDefaultWhenStoredModelIsNoLongerAllowed() {
+        BotUser user = new BotUser(1L, "john", "John");
+        user.setSelectedModel("removed-model");
+        userRepository.save(user);
+
+        assertEquals("gpt-4o-mini", service.getModel(1L));
+    }
+
+    @Test
     void shouldTrackModelsPerUser() {
         service.setModel(1L, "gpt-4o");
         service.setModel(2L, "gpt-4-turbo");

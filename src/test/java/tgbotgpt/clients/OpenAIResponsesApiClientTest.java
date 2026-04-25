@@ -127,6 +127,22 @@ class OpenAIResponsesApiClientTest {
         );
     }
 
+    @Test
+    void shouldRejectResponsesRequestWithoutUserInput() {
+        OpenAIResponsesApiClient client = createClient(request -> fail("HTTP call should not be attempted"));
+        Message system = new Message();
+        system.setRole("system");
+        system.setContent("You are helpful.");
+        ChatRequest request = chatRequest();
+        request.setMessages(List.of(system));
+
+        OpenAiClientException error = assertThrows(OpenAiClientException.class,
+                () -> client.getCompletion(request).block());
+
+        assertFalse(error.isRetryable());
+        assertTrue(error.getMessage().contains("requires at least one non-system message"));
+    }
+
     private OpenAIResponsesApiClient createClient(ExchangeFunction exchangeFunction) {
         OpenAIResponsesApiClient client = new OpenAIResponsesApiClient(
                 WebClient.builder().exchangeFunction(exchangeFunction),

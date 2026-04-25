@@ -27,6 +27,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 | `/start`           | Bot introduction                         |
 | `/usage`           | Show your personal token/message stats   |
 | `/reset`           | Reset conversation context + history     |
+| `/status`          | Show service status (owner only)         |
 | `/model`           | Show current model                       |
 | `/model <name>`    | Switch to a different GPT model          |
 | `/prompt <text>`   | Set a custom system prompt               |
@@ -40,6 +41,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - Spring Boot 3.3.1
 - Spring Data JPA + PostgreSQL
 - Flyway database migrations
+- Spring Boot Actuator (health, metrics)
 - Spring WebFlux (WebClient for OpenAI API)
 - [java-telegram-bot-api](https://github.com/pengrad/java-telegram-bot-api)
 - Lombok
@@ -65,7 +67,9 @@ Edit `.env`:
 
 ```
 BOT_TOKEN=your-telegram-bot-token
+BOT_OWNER_IDS=your-telegram-user-id
 OPENAI_APIKEY=your-openai-api-key
+OPENAI_API_MODE=responses
 SPRING_PROFILES_ACTIVE=dev
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your-postgres-password
@@ -121,7 +125,7 @@ Set `ENCRYPTION_REQUIRED=true` to fail startup if the key is missing or invalid.
 
 For production, run with `SPRING_PROFILES_ACTIVE=prod`. The `prod` profile runs Flyway migrations, uses `spring.jpa.hibernate.ddl-auto=validate`, requires explicit datasource environment variables, and requires encryption by default.
 
-Database migrations live in `src/main/resources/db/migration`.
+Database migrations live in `src/main/resources/db/migration`. Flyway is disabled in `dev` (Hibernate manages the schema via `ddl-auto=update`); set `SPRING_FLYWAY_ENABLED=true` to opt in. When enabling `prod` against a database that was previously managed by Hibernate, set `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` for the first run.
 
 ## Configuration
 
@@ -130,6 +134,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | Property                       | Description                          | Default               |
 |--------------------------------|--------------------------------------|-----------------------|
 | `spring.profiles.default`      | Default Spring profile               | `dev`                 |
+| `bot.owner.ids`                | Comma-separated Telegram user IDs allowed to run owner commands | empty |
 | `openai.api.mode`              | OpenAI API mode: `responses` or `chat` | `responses`          |
 | `openai.url`                   | OpenAI Chat Completions endpoint     | `https://api.openai.com/v1/chat/completions` |
 | `openai.responses.url`         | OpenAI Responses API endpoint        | `https://api.openai.com/v1/responses` |
@@ -152,6 +157,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `bot.prompt.max.length`        | Max custom prompt length             | `500`                 |
 | `bot.image.max.size.mb`        | Max image size in MB                 | `10`                  |
 | `bot.image.allowed.types`      | Allowed MIME types for image analysis | `image/jpeg,image/png,image/gif,image/webp` |
+| `management.endpoints.web.exposure.include` | Actuator endpoints exposed over HTTP | `health,info,metrics` |
 
 ## Security
 
@@ -168,6 +174,8 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - Production profile can require encryption at startup
 - Automatic cleanup of old chat history (30-day retention)
 - Whitelist support for restricting bot access
+- Owner-only `/status` command reports runtime health without tokens, keys, or user content
+- Actuator health and metrics endpoints are available for deployment monitoring
 
 ## License
 

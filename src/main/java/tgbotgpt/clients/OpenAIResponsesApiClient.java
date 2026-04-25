@@ -51,32 +51,32 @@ public class OpenAIResponsesApiClient {
     }
 
     public Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
-        return webClient().post()
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(toResponsesRequest(chatRequest, false))
-                .retrieve()
-                .onStatus(HttpStatusCode::isError, response -> mapError(response.statusCode(), response.bodyToMono(String.class)))
-                .bodyToMono(ResponsesResponse.class)
-                .map(this::toChatResponse)
+        return Mono.defer(() -> webClient().post()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(toResponsesRequest(chatRequest, false))
+                        .retrieve()
+                        .onStatus(HttpStatusCode::isError, response -> mapError(response.statusCode(), response.bodyToMono(String.class)))
+                        .bodyToMono(ResponsesResponse.class)
+                        .map(this::toChatResponse))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
                 .onErrorMap(this::mapTransportError)
                 .retryWhen(retrySpec());
     }
 
     public Flux<StreamChunk> getCompletionStream(ChatRequest chatRequest) {
-        return webClient().post()
-                .contentType(MediaType.APPLICATION_JSON)
-                .accept(MediaType.TEXT_EVENT_STREAM)
-                .bodyValue(toResponsesRequest(chatRequest, true))
-                .retrieve()
-                .onStatus(HttpStatusCode::isError, response -> mapError(response.statusCode(), response.bodyToMono(String.class)))
-                .bodyToFlux(SSE_TYPE)
-                .filter(event -> event.data() != null && !"[DONE]".equals(event.data()))
-                .map(event -> parseStreamEvent(event.data()))
-                .filter(this::isTextDeltaEvent)
-                .map(this::streamDelta)
-                .filter(delta -> delta != null && !delta.isEmpty())
-                .map(this::toStreamChunk)
+        return Flux.defer(() -> webClient().post()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .bodyValue(toResponsesRequest(chatRequest, true))
+                        .retrieve()
+                        .onStatus(HttpStatusCode::isError, response -> mapError(response.statusCode(), response.bodyToMono(String.class)))
+                        .bodyToFlux(SSE_TYPE)
+                        .filter(event -> event.data() != null && !"[DONE]".equals(event.data()))
+                        .map(event -> parseStreamEvent(event.data()))
+                        .filter(this::isTextDeltaEvent)
+                        .map(this::streamDelta)
+                        .filter(delta -> delta != null && !delta.isEmpty())
+                        .map(this::toStreamChunk))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
                 .onErrorMap(this::mapTransportError)
                 .retryWhen(retrySpec());
@@ -119,6 +119,9 @@ public class OpenAIResponsesApiClient {
         }
         if (!instructions.isEmpty()) {
             body.put("instructions", instructions.toString());
+        }
+        if (input.isEmpty()) {
+            throw new OpenAiClientException("Responses API request requires at least one non-system message", false);
         }
         body.put("input", input);
         return body;

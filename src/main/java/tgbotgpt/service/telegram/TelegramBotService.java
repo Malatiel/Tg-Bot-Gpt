@@ -15,6 +15,8 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import tgbotgpt.service.BotAdminService;
+import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.DocumentExtractionResult;
 import tgbotgpt.service.DocumentService;
 import tgbotgpt.service.ImageService;
@@ -39,6 +41,8 @@ public class TelegramBotService {
     private final GptService gptService;
     private final ImageService imageService;
     private final DocumentService documentService;
+    private final BotAdminService adminService;
+    private final BotMetricsService metrics;
 
     @Value("${bot.token}")
     private String botToken;
@@ -52,10 +56,13 @@ public class TelegramBotService {
     private TelegramBot bot;
     private final ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
-    public TelegramBotService(GptService gptService, ImageService imageService, DocumentService documentService) {
+    public TelegramBotService(GptService gptService, ImageService imageService, DocumentService documentService,
+                              BotAdminService adminService, BotMetricsService metrics) {
         this.gptService = gptService;
         this.imageService = imageService;
         this.documentService = documentService;
+        this.adminService = adminService;
+        this.metrics = metrics;
     }
 
     @PostConstruct
@@ -203,7 +210,7 @@ public class TelegramBotService {
                     accumulated.append(chunk);
                     long now = System.currentTimeMillis();
                     if (now - lastUpdateTime.get() >= STREAM_UPDATE_INTERVAL_MS) {
-                        String current = TelegramUtils.fitMessage(accumulated.toString());
+                        String current = TelegramUtils.truncateForEdit(accumulated.toString());
                         if (!current.equals(lastSent.get())) {
                             editMessage(chatId, messageId, current);
                             lastSent.set(current);
@@ -238,8 +245,11 @@ public class TelegramBotService {
 
     private void editMessage(long chatId, int messageId, String text) {
         try {
-            bot.execute(new EditMessageText(chatId, messageId, TelegramUtils.fitMessage(text)));
+            com.pengrad.telegrambot.response.BaseResponse response =
+                    bot.execute(new EditMessageText(chatId, messageId, TelegramUtils.truncateForEdit(text)));
+            metrics.recordTelegramEdit(response.isOk());
         } catch (Exception e) {
+            metrics.recordTelegramEdit(false);
             log.error("Failed to edit message: ", e);
         }
     }
@@ -253,9 +263,11 @@ public class TelegramBotService {
 
     private void sendReply(Update update, String message) {
         SendResponse sendResponse = bot.execute(buildSendMessage(update, message, true));
+        metrics.recordTelegramSend(true, sendResponse.isOk());
         if (!sendResponse.isOk()) {
             log.warn("Failed to send Markdown message: {}", sendResponse.description());
             SendResponse plainResponse = bot.execute(buildSendMessage(update, message, false));
+            metrics.recordTelegramSend(false, plainResponse.isOk());
             if (!plainResponse.isOk()) {
                 log.error("Failed to send plain message: {}", plainResponse.description());
             }
@@ -308,6 +320,10 @@ public class TelegramBotService {
             handlePromptCommand(update);
             return;
         }
+        if (text.startsWith("/status")) {
+            handleStatusCommand(update);
+            return;
+        }
 
         switch (text) {
             case "/start":
@@ -358,6 +374,11 @@ public class TelegramBotService {
 
         String result = gptService.setUserPrompt(userId, promptText);
         sendReply(update, result);
+    }
+
+    private void handleStatusCommand(Update update) {
+        Long userId = update.message().from().id();
+        sendReply(update, adminService.statusFor(userId));
     }
 
     private void presentation(Update update) {

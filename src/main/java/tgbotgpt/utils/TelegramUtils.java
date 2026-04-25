@@ -38,7 +38,12 @@ public final class TelegramUtils {
         return parts;
     }
 
-    public static String fitMessage(String text) {
+    /**
+     * Hard-truncates text to Telegram's per-message limit. Lossy by design —
+     * use only for live-edit previews where the final message is later split
+     * via {@link #splitMessage(String)}.
+     */
+    public static String truncateForEdit(String text) {
         if (text == null || text.isEmpty()) {
             return "";
         }

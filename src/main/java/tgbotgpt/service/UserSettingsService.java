@@ -45,6 +45,7 @@ public class UserSettingsService {
         return userRepository.findById(userId)
                 .map(BotUser::getSelectedModel)
                 .filter(m -> m != null && !m.isBlank())
+                .filter(allowedModels::contains)
                 .orElse(defaultModel);
     }
 

@@ -10,5 +10,5 @@ RUN chmod +x mvnw && ./mvnw -q -DskipTests package
 
 FROM eclipse-temurin:22-jre
 WORKDIR /app
-COPY --from=build /workspace/target/*.jar app.jar
+COPY --from=build /workspace/target/Tg-Bot-Gpt-*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]

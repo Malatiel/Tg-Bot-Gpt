@@ -12,6 +12,7 @@ import tgbotgpt.clients.OpenAIResponsesApiClient;
 import tgbotgpt.model.dto.Message;
 import tgbotgpt.model.dto.request.ChatRequest;
 import tgbotgpt.model.dto.response.ChatResponse;
+import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
@@ -33,6 +34,7 @@ public class GptService {
     private final RateLimiter rateLimiter;
     private final UserSettingsService userSettings;
     private final ChatHistoryService chatHistory;
+    private final BotMetricsService metrics;
 
     @Value("${openai.maxtokens}")
     private Integer maxtokens;
@@ -54,13 +56,14 @@ public class GptService {
     private final AtomicInteger ntokens = new AtomicInteger(0);
 
     public GptService(OpenAIApiClient client, OpenAIResponsesApiClient responsesClient, Environment env, RateLimiter rateLimiter,
-                      UserSettingsService userSettings, ChatHistoryService chatHistory) {
+                      UserSettingsService userSettings, ChatHistoryService chatHistory, BotMetricsService metrics) {
         this.client = client;
         this.responsesClient = responsesClient;
         this.env = env;
         this.rateLimiter = rateLimiter;
         this.userSettings = userSettings;
         this.chatHistory = chatHistory;
+        this.metrics = metrics;
     }
 
     public int getNumTokens() {
@@ -417,17 +420,23 @@ public class GptService {
     }
 
     private reactor.core.publisher.Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
+        metrics.recordOpenAiRequest(apiMode, "completion");
         if (useResponsesApi()) {
-            return responsesClient.getCompletion(chatRequest);
+            return responsesClient.getCompletion(chatRequest)
+                    .doOnError(error -> metrics.recordOpenAiError(apiMode, "completion", error));
         }
-        return client.getCompletion(chatRequest);
+        return client.getCompletion(chatRequest)
+                .doOnError(error -> metrics.recordOpenAiError(apiMode, "completion", error));
     }
 
     private Flux<tgbotgpt.model.dto.response.StreamChunk> getCompletionStream(ChatRequest chatRequest) {
+        metrics.recordOpenAiRequest(apiMode, "stream");
         if (useResponsesApi()) {
-            return responsesClient.getCompletionStream(chatRequest);
+            return responsesClient.getCompletionStream(chatRequest)
+                    .doOnError(error -> metrics.recordOpenAiError(apiMode, "stream", error));
         }
-        return client.getCompletionStream(chatRequest);
+        return client.getCompletionStream(chatRequest)
+                .doOnError(error -> metrics.recordOpenAiError(apiMode, "stream", error));
     }
 
     private boolean useResponsesApi() {
