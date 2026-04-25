@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   test:
-    name: Test
+    name: Clean Install
     runs-on: ubuntu-latest
 
     steps:
@@ -30,8 +30,8 @@ jobs:
           java-version: "22"
           cache: maven
 
-      - name: Run tests
-        run: ./mvnw test
+      - name: Run clean install
+        run: ./mvnw clean install
 
   release:
     name: Release
