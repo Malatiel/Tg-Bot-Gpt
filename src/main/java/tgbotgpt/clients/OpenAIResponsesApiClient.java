@@ -1,6 +1,7 @@
 package tgbotgpt.clients;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatusCode;
@@ -44,10 +45,20 @@ public class OpenAIResponsesApiClient {
 
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper mapper;
+    private WebClient webClient;
 
     public OpenAIResponsesApiClient(WebClient.Builder webClientBuilder, ObjectMapper mapper) {
         this.webClientBuilder = webClientBuilder;
         this.mapper = mapper;
+    }
+
+    @PostConstruct
+    private void init() {
+        webClient = webClientBuilder
+                .baseUrl(url)
+                .defaultHeader("Content-Type", "application/json")
+                .defaultHeader("Authorization", "Bearer " + apiKey)
+                .build();
     }
 
     public Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
@@ -73,21 +84,18 @@ public class OpenAIResponsesApiClient {
                         .bodyToFlux(SSE_TYPE)
                         .filter(event -> event.data() != null && !"[DONE]".equals(event.data()))
                         .map(event -> parseStreamEvent(event.data()))
-                        .filter(this::isTextDeltaEvent)
-                        .map(this::streamDelta)
-                        .filter(delta -> delta != null && !delta.isEmpty())
-                        .map(this::toStreamChunk))
+                        .map(this::toStreamChunk)
+                        .filter(Objects::nonNull))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
                 .onErrorMap(this::mapTransportError)
                 .retryWhen(retrySpec());
     }
 
     private WebClient webClient() {
-        return webClientBuilder
-                .baseUrl(url)
-                .defaultHeader("Content-Type", "application/json")
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .build();
+        if (webClient == null) {
+            init();
+        }
+        return webClient;
     }
 
     private Map<String, Object> toResponsesRequest(ChatRequest chatRequest, boolean stream) {
@@ -214,15 +222,31 @@ public class OpenAIResponsesApiClient {
         }
     }
 
-    private String streamDelta(ResponsesStreamEvent event) {
-        return event.getDelta();
-    }
-
     private boolean isTextDeltaEvent(ResponsesStreamEvent event) {
         return "response.output_text.delta".equals(event.getType());
     }
 
-    private StreamChunk toStreamChunk(String delta) {
+    private boolean isCompletedEvent(ResponsesStreamEvent event) {
+        return "response.completed".equals(event.getType());
+    }
+
+    private StreamChunk toStreamChunk(ResponsesStreamEvent event) {
+        if (isTextDeltaEvent(event)) {
+            return toTextStreamChunk(event.getDelta());
+        }
+        if (isCompletedEvent(event) && event.getResponse() != null && event.getResponse().getUsage() != null) {
+            StreamChunk chunk = new StreamChunk();
+            chunk.setChoices(List.of());
+            chunk.setUsage(event.getResponse().getUsage());
+            return chunk;
+        }
+        return null;
+    }
+
+    private StreamChunk toTextStreamChunk(String delta) {
+        if (delta == null || delta.isEmpty()) {
+            return null;
+        }
         Message message = new Message();
         message.setContent(delta);
 

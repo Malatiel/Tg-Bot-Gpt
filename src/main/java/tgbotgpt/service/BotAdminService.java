@@ -66,7 +66,7 @@ public class BotAdminService {
         return String.format("""
                 Service: %s
                 Version: %s
-                Status: UP
+                Status: %s
                 Uptime: %s
                 OpenAI API mode: %s
                 Default model: %s
@@ -75,6 +75,7 @@ public class BotAdminService {
                 """,
                 status.applicationName(),
                 status.version(),
+                status.applicationStatus(),
                 formatDuration(status.uptime()),
                 status.apiMode(),
                 status.defaultModel(),

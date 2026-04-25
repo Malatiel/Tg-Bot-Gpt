@@ -75,7 +75,7 @@ class OpenAIResponsesApiClientTest {
 
                             data: {"type":"response.output_text.delta","delta":"lo"}
 
-                            data: {"type":"response.completed"}
+                            data: {"type":"response.completed","response":{"usage":{"total_tokens":11}}}
 
                             data: [DONE]
 
@@ -86,9 +86,11 @@ class OpenAIResponsesApiClientTest {
         List<StreamChunk> chunks = client.getCompletionStream(chatRequest()).collectList().block();
 
         assertNotNull(chunks);
-        assertEquals(2, chunks.size());
+        assertEquals(3, chunks.size());
         assertEquals("Hel", chunks.get(0).getChoices().get(0).getDelta().getContentAsString());
         assertEquals("lo", chunks.get(1).getChoices().get(0).getDelta().getContentAsString());
+        assertTrue(chunks.get(2).getChoices().isEmpty());
+        assertEquals(11, chunks.get(2).getUsage().getTotalTokens());
         assertEquals(List.of(MediaType.TEXT_EVENT_STREAM), capturedRequest.get().headers().getAccept());
     }
 

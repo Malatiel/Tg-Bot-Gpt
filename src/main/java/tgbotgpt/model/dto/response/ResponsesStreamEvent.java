@@ -13,4 +13,7 @@ public class ResponsesStreamEvent {
 
     @JsonProperty("delta")
     private String delta;
+
+    @JsonProperty("response")
+    private ResponsesResponse response;
 }

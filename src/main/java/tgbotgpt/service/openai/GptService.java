@@ -10,8 +10,11 @@ import reactor.core.publisher.Flux;
 import tgbotgpt.clients.OpenAIApiClient;
 import tgbotgpt.clients.OpenAIResponsesApiClient;
 import tgbotgpt.model.dto.Message;
+import tgbotgpt.model.dto.Usage;
 import tgbotgpt.model.dto.request.ChatRequest;
 import tgbotgpt.model.dto.response.ChatResponse;
+import tgbotgpt.model.dto.response.StreamChunk;
+import tgbotgpt.service.BotAdminService;
 import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
@@ -22,6 +25,7 @@ import tgbotgpt.model.entity.ChatMessage;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -35,6 +39,7 @@ public class GptService {
     private final UserSettingsService userSettings;
     private final ChatHistoryService chatHistory;
     private final BotMetricsService metrics;
+    private final BotAdminService adminService;
 
     @Value("${openai.maxtokens}")
     private Integer maxtokens;
@@ -56,7 +61,8 @@ public class GptService {
     private final AtomicInteger ntokens = new AtomicInteger(0);
 
     public GptService(OpenAIApiClient client, OpenAIResponsesApiClient responsesClient, Environment env, RateLimiter rateLimiter,
-                      UserSettingsService userSettings, ChatHistoryService chatHistory, BotMetricsService metrics) {
+                      UserSettingsService userSettings, ChatHistoryService chatHistory, BotMetricsService metrics,
+                      BotAdminService adminService) {
         this.client = client;
         this.responsesClient = responsesClient;
         this.env = env;
@@ -64,6 +70,7 @@ public class GptService {
         this.userSettings = userSettings;
         this.chatHistory = chatHistory;
         this.metrics = metrics;
+        this.adminService = adminService;
     }
 
     public int getNumTokens() {
@@ -217,10 +224,20 @@ public class GptService {
         try {
             ChatRequest chatRequest = createChatRequest(update);
             StringBuilder fullResponse = new StringBuilder();
+            AtomicReference<Integer> streamTokens = new AtomicReference<>();
 
             return getCompletionStream(chatRequest)
-                    .filter(chunk -> chunk.getChoices() != null && !chunk.getChoices().isEmpty())
+                    .doOnNext(chunk -> {
+                        Integer totalTokens = totalTokens(chunk.getUsage());
+                        if (totalTokens != null) {
+                            streamTokens.set(totalTokens);
+                            ntokens.addAndGet(totalTokens);
+                        }
+                    })
                     .map(chunk -> {
+                        if (chunk.getChoices() == null || chunk.getChoices().isEmpty()) {
+                            return "";
+                        }
                         String content = chunk.getChoices().get(0).getDelta() != null
                                 ? chunk.getChoices().get(0).getDelta().getContentAsString()
                                 : null;
@@ -230,7 +247,7 @@ public class GptService {
                         return content != null ? content : "";
                     })
                     .filter(s -> !s.isEmpty())
-                    .doOnComplete(() -> persistExchange(userId, userText, fullResponse.toString(), null))
+                    .doOnComplete(() -> persistExchange(userId, userText, fullResponse.toString(), streamTokens.get()))
                     .doOnError(e -> log.error("Stream error: ", e));
         } catch (Exception e) {
             log.error("Error: ", e);
@@ -420,23 +437,29 @@ public class GptService {
     }
 
     private reactor.core.publisher.Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
-        metrics.recordOpenAiRequest(apiMode, "completion");
         if (useResponsesApi()) {
             return responsesClient.getCompletion(chatRequest)
+                    .doOnSubscribe(subscription -> metrics.recordOpenAiRequest(apiMode, "completion"))
                     .doOnError(error -> metrics.recordOpenAiError(apiMode, "completion", error));
         }
         return client.getCompletion(chatRequest)
+                .doOnSubscribe(subscription -> metrics.recordOpenAiRequest(apiMode, "completion"))
                 .doOnError(error -> metrics.recordOpenAiError(apiMode, "completion", error));
     }
 
-    private Flux<tgbotgpt.model.dto.response.StreamChunk> getCompletionStream(ChatRequest chatRequest) {
-        metrics.recordOpenAiRequest(apiMode, "stream");
+    private Flux<StreamChunk> getCompletionStream(ChatRequest chatRequest) {
         if (useResponsesApi()) {
             return responsesClient.getCompletionStream(chatRequest)
+                    .doOnSubscribe(subscription -> metrics.recordOpenAiRequest(apiMode, "stream"))
                     .doOnError(error -> metrics.recordOpenAiError(apiMode, "stream", error));
         }
         return client.getCompletionStream(chatRequest)
+                .doOnSubscribe(subscription -> metrics.recordOpenAiRequest(apiMode, "stream"))
                 .doOnError(error -> metrics.recordOpenAiError(apiMode, "stream", error));
+    }
+
+    private Integer totalTokens(Usage usage) {
+        return usage != null ? usage.getTotalTokens() : null;
     }
 
     private boolean useResponsesApi() {
@@ -468,6 +491,9 @@ public class GptService {
         }
 
         String userId = String.valueOf(update.message().from().id());
+        if (adminService.isOwner(update.message().from().id())) {
+            return true;
+        }
         String username = update.message().from().username() != null ? update.message().from().username().toLowerCase() : "";
         String groupName = update.message().chat().title() != null ? update.message().chat().title().toLowerCase() : "";
 

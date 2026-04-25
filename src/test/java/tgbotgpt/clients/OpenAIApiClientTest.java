@@ -15,6 +15,7 @@ import tgbotgpt.model.dto.response.ChatResponse;
 import tgbotgpt.model.dto.response.StreamChunk;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -66,8 +67,9 @@ class OpenAIApiClientTest {
     @Test
     void shouldParseStreamingResponse() {
         AtomicReference<ClientRequest> capturedRequest = new AtomicReference<>();
-        OpenAIApiClient client = createClient(request -> {
-            capturedRequest.set(request);
+        ChatRequest chatRequest = chatRequest();
+        OpenAIApiClient client = createClient(clientRequest -> {
+            capturedRequest.set(clientRequest);
             return Mono.just(ClientResponse.create(HttpStatus.OK)
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
                     .body("""
@@ -75,16 +77,21 @@ class OpenAIApiClientTest {
 
                             data: {"id":"1","choices":[{"delta":{"content":"lo"}}]}
 
+                            data: {"id":"1","choices":[],"usage":{"total_tokens":9}}
+
                             data: [DONE]
 
                             """)
                     .build());
         });
 
-        StreamChunk first = client.getCompletionStream(chatRequest()).blockFirst();
+        List<StreamChunk> chunks = client.getCompletionStream(chatRequest).collectList().block();
 
-        assertNotNull(first);
-        assertEquals("Hel", first.getChoices().get(0).getDelta().getContentAsString());
+        assertNotNull(chunks);
+        assertEquals("Hel", chunks.get(0).getChoices().get(0).getDelta().getContentAsString());
+        assertEquals(9, chunks.get(2).getUsage().getTotalTokens());
+        assertTrue(chatRequest.getStream());
+        assertEquals(Map.of("include_usage", true), chatRequest.getStreamOptions());
         assertEquals(List.of(MediaType.TEXT_EVENT_STREAM), capturedRequest.get().headers().getAccept());
     }
 

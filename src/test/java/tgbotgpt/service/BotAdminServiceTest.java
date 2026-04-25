@@ -32,7 +32,8 @@ class BotAdminServiceTest {
         BotStatusService statusService = mock(BotStatusService.class);
         when(statusService.getStatus()).thenReturn(new BotStatusService.BotStatusSnapshot(
                 "Tg-Bot-Gpt",
-                "0.1.1",
+                "0.1.2",
+                "UP",
                 "responses",
                 "gpt-4o-mini",
                 true,
@@ -45,7 +46,8 @@ class BotAdminServiceTest {
         String status = service.statusFor(1L);
 
         assertTrue(status.contains("Service: Tg-Bot-Gpt"));
-        assertTrue(status.contains("Version: 0.1.1"));
+        assertTrue(status.contains("Version: 0.1.2"));
+        assertTrue(status.contains("Status: UP"));
         assertTrue(status.contains("OpenAI API mode: responses"));
         assertTrue(status.contains("Default model: gpt-4o-mini"));
         assertTrue(status.contains("Database: UP"));

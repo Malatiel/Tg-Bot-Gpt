@@ -20,4 +20,28 @@ class ConfigurationDefaultsTest {
 
         assertEquals("${OPENAI_API_MODE:responses}", properties.getProperty("openai.api.mode"));
     }
+
+    @Test
+    void shouldBindActuatorToLocalhostManagementPortByDefault() throws Exception {
+        Properties properties = new Properties();
+        try (InputStream stream = getClass().getClassLoader().getResourceAsStream("application.properties")) {
+            assertNotNull(stream);
+            properties.load(stream);
+        }
+
+        assertEquals("8081", properties.getProperty("management.server.port"));
+        assertEquals("127.0.0.1", properties.getProperty("management.server.address"));
+    }
+
+    @Test
+    void shouldExposeOnlyHealthActuatorEndpointInProd() throws Exception {
+        Properties properties = new Properties();
+        try (InputStream stream = getClass().getClassLoader().getResourceAsStream("application-prod.properties")) {
+            assertNotNull(stream);
+            properties.load(stream);
+        }
+
+        assertEquals("health", properties.getProperty("management.endpoints.web.exposure.include"));
+        assertEquals("never", properties.getProperty("management.endpoint.health.show-details"));
+    }
 }

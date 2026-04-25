@@ -92,7 +92,9 @@ docker compose up --build
 
 ```bash
 export BOT_TOKEN=your-telegram-bot-token
+export BOT_OWNER_IDS=your-telegram-user-id
 export OPENAI_APIKEY=your-openai-api-key
+export OPENAI_API_MODE=responses
 export SPRING_PROFILES_ACTIVE=dev
 export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/tgbotgpt
 export SPRING_DATASOURCE_USERNAME=postgres
@@ -157,7 +159,9 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `bot.prompt.max.length`        | Max custom prompt length             | `500`                 |
 | `bot.image.max.size.mb`        | Max image size in MB                 | `10`                  |
 | `bot.image.allowed.types`      | Allowed MIME types for image analysis | `image/jpeg,image/png,image/gif,image/webp` |
-| `management.endpoints.web.exposure.include` | Actuator endpoints exposed over HTTP | `health,info,metrics` |
+| `management.server.port`      | Actuator HTTP port                   | `8081`                |
+| `management.server.address`   | Actuator bind address                | `127.0.0.1`           |
+| `management.endpoints.web.exposure.include` | Actuator endpoints exposed over HTTP | `health,info,metrics` (`health` in `prod`) |
 
 ## Security
 
@@ -175,7 +179,8 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - Automatic cleanup of old chat history (30-day retention)
 - Whitelist support for restricting bot access
 - Owner-only `/status` command reports runtime health without tokens, keys, or user content
-- Actuator health and metrics endpoints are available for deployment monitoring
+- Actuator binds to `127.0.0.1:8081` by default; the `prod` profile exposes only `/actuator/health`
+- Streaming OpenAI responses include usage accounting so `/usage` tracks token totals for streaming users
 
 ## License
 

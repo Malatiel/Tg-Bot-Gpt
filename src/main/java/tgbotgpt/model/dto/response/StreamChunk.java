@@ -3,6 +3,7 @@ package tgbotgpt.model.dto.response;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
+import tgbotgpt.model.dto.Usage;
 
 import java.util.List;
 
@@ -15,4 +16,7 @@ public class StreamChunk {
 
     @JsonProperty("choices")
     private List<StreamChoice> choices;
+
+    @JsonProperty("usage")
+    private Usage usage;
 }

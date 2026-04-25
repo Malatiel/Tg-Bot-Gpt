@@ -20,9 +20,9 @@ class BotStatusServiceTest {
         DataSource dataSource = mock(DataSource.class);
         when(dataSource.getConnection()).thenReturn(connection);
 
-        BotStatusService service = new BotStatusService(dataSource, Optional.empty());
+        BotStatusService service = new BotStatusService(dataSource, Optional.empty(), Optional.empty());
         ReflectionTestUtils.setField(service, "applicationName", "Tg-Bot-Gpt");
-        ReflectionTestUtils.setField(service, "fallbackVersion", "0.1.1");
+        ReflectionTestUtils.setField(service, "fallbackVersion", "0.1.2");
         ReflectionTestUtils.setField(service, "apiMode", "responses");
         ReflectionTestUtils.setField(service, "defaultModel", "gpt-4o-mini");
         ReflectionTestUtils.setField(service, "streamingEnabled", true);
@@ -30,7 +30,8 @@ class BotStatusServiceTest {
         BotStatusService.BotStatusSnapshot status = service.getStatus();
 
         assertEquals("Tg-Bot-Gpt", status.applicationName());
-        assertEquals("0.1.1", status.version());
+        assertEquals("0.1.2", status.version());
+        assertEquals("UP", status.applicationStatus());
         assertEquals("responses", status.apiMode());
         assertEquals("gpt-4o-mini", status.defaultModel());
         assertTrue(status.streamingEnabled());
@@ -43,7 +44,7 @@ class BotStatusServiceTest {
         DataSource dataSource = mock(DataSource.class);
         when(dataSource.getConnection()).thenThrow(new IllegalStateException("unavailable"));
 
-        BotStatusService service = new BotStatusService(dataSource, Optional.empty());
+        BotStatusService service = new BotStatusService(dataSource, Optional.empty(), Optional.empty());
 
         assertEquals("DOWN", service.getStatus().databaseStatus());
     }

@@ -21,6 +21,7 @@ import tgbotgpt.model.dto.request.ChatRequest;
 import tgbotgpt.model.dto.response.ChatResponse;
 import tgbotgpt.model.dto.response.StreamChoice;
 import tgbotgpt.model.dto.response.StreamChunk;
+import tgbotgpt.service.BotAdminService;
 import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
@@ -50,12 +51,14 @@ class GptServiceTest {
     private ChatHistoryService chatHistory;
     @Mock
     private BotMetricsService metrics;
+    @Mock
+    private BotAdminService adminService;
 
     private GptService gptService;
 
     @BeforeEach
     void setUp() {
-        gptService = new GptService(client, responsesClient, env, rateLimiter, userSettings, chatHistory, metrics);
+        gptService = new GptService(client, responsesClient, env, rateLimiter, userSettings, chatHistory, metrics, adminService);
         ReflectionTestUtils.setField(gptService, "maxtokens", 3000);
         ReflectionTestUtils.setField(gptService, "temperature", 0.7);
         ReflectionTestUtils.setField(gptService, "defaultSystemPrompt", "You are a helpful assistant.");
@@ -68,6 +71,7 @@ class GptServiceTest {
 
         // Default: empty history from DB
         lenient().when(chatHistory.getRecentMessages(anyLong(), anyInt())).thenReturn(Collections.emptyList());
+        lenient().when(adminService.isOwner(anyLong())).thenReturn(false);
     }
 
     @Test
@@ -210,6 +214,45 @@ class GptServiceTest {
         verify(chatHistory).saveMessage(1L, "assistant", "Hi there", null);
         verify(userSettings).recordMessage(1L);
         verify(userSettings, never()).recordUsage(anyLong(), anyInt());
+    }
+
+    @Test
+    void shouldTrackTokensForStreamResponseWhenUsageChunkArrives() {
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("Hello")).thenReturn(false);
+        when(client.getCompletionStream(any(ChatRequest.class)))
+                .thenReturn(Flux.just(createStreamChunk("Hi"), createStreamChunk(" there"), createUsageChunk(42)));
+
+        String result = String.join("", gptService.sendMessageStream(update).collectList().block());
+
+        assertEquals("Hi there", result);
+        assertEquals(42, gptService.getNumTokens());
+        verify(chatHistory).saveMessage(1L, "assistant", "Hi there", 42);
+        verify(userSettings).recordUsage(1L, 42);
+        verify(userSettings, never()).recordMessage(1L);
+    }
+
+    @Test
+    void shouldRecordStreamRequestMetricOnlyOnSubscription() {
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("Hello")).thenReturn(false);
+        when(client.getCompletionStream(any(ChatRequest.class))).thenReturn(Flux.just(createStreamChunk("Hi")));
+
+        Flux<String> stream = gptService.sendMessageStream(update);
+
+        verify(metrics, never()).recordOpenAiRequest(anyString(), eq("stream"));
+
+        stream.collectList().block();
+
+        verify(metrics).recordOpenAiRequest("chat", "stream");
     }
 
     @Test
@@ -375,14 +418,15 @@ class GptServiceTest {
         when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
         when(userSettings.containsInjection("Hello")).thenReturn(false);
         when(responsesClient.getCompletionStream(any(ChatRequest.class)))
-                .thenReturn(Flux.just(createStreamChunk("Hi"), createStreamChunk(" there")));
+                .thenReturn(Flux.just(createStreamChunk("Hi"), createStreamChunk(" there"), createUsageChunk(12)));
 
         String result = String.join("", gptService.sendMessageStream(update).collectList().block());
 
         assertEquals("Hi there", result);
         verify(responsesClient).getCompletionStream(any(ChatRequest.class));
         verify(client, never()).getCompletionStream(any(ChatRequest.class));
-        verify(chatHistory).saveMessage(1L, "assistant", "Hi there", null);
+        verify(chatHistory).saveMessage(1L, "assistant", "Hi there", 12);
+        verify(userSettings).recordUsage(1L, 12);
     }
 
     @Test
@@ -519,6 +563,15 @@ class GptServiceTest {
         assertTrue(gptService.checkPermission(update));
     }
 
+    @Test
+    void shouldAllowOwnerEvenWhenWhitelistDoesNotContainOwner() {
+        ReflectionTestUtils.setField(gptService, "whiteSet", java.util.Set.of("someoneelse"));
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(adminService.isOwner(1L)).thenReturn(true);
+
+        assertTrue(gptService.checkPermission(update));
+    }
+
     private Update createGroupUpdate(Long userId, String text) {
         Update update = mock(Update.class);
         com.pengrad.telegrambot.model.Message message = mock(com.pengrad.telegrambot.model.Message.class);
@@ -584,6 +637,16 @@ class GptServiceTest {
 
         StreamChunk chunk = new StreamChunk();
         chunk.setChoices(List.of(choice));
+        return chunk;
+    }
+
+    private StreamChunk createUsageChunk(int totalTokens) {
+        Usage usage = new Usage();
+        usage.setTotalTokens(totalTokens);
+
+        StreamChunk chunk = new StreamChunk();
+        chunk.setChoices(List.of());
+        chunk.setUsage(usage);
         return chunk;
     }
 }

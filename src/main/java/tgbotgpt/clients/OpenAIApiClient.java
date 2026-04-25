@@ -1,6 +1,7 @@
 package tgbotgpt.clients;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatusCode;
@@ -17,6 +18,7 @@ import tgbotgpt.model.dto.response.StreamChunk;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Map;
 
 @Service
 public class OpenAIApiClient {
@@ -42,10 +44,20 @@ public class OpenAIApiClient {
 
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper mapper;
+    private WebClient webClient;
 
     public OpenAIApiClient(WebClient.Builder webClientBuilder, ObjectMapper mapper) {
         this.webClientBuilder = webClientBuilder;
         this.mapper = mapper;
+    }
+
+    @PostConstruct
+    private void init() {
+        webClient = webClientBuilder
+                .baseUrl(url)
+                .defaultHeader("Content-Type", "application/json")
+                .defaultHeader("Authorization", "Bearer " + apiKey)
+                .build();
     }
 
     public Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
@@ -62,6 +74,7 @@ public class OpenAIApiClient {
 
     public Flux<StreamChunk> getCompletionStream(ChatRequest chatRequest) {
         chatRequest.setStream(true);
+        chatRequest.setStreamOptions(Map.of("include_usage", true));
 
         return webClient().post()
                 .contentType(MediaType.APPLICATION_JSON)
@@ -78,11 +91,10 @@ public class OpenAIApiClient {
     }
 
     private WebClient webClient() {
-        return webClientBuilder
-                .baseUrl(url)
-                .defaultHeader("Content-Type", "application/json")
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .build();
+        if (webClient == null) {
+            init();
+        }
+        return webClient;
     }
 
     private StreamChunk parseChunk(String data) {
