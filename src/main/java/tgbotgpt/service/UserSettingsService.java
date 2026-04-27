@@ -8,10 +8,13 @@ import org.springframework.transaction.annotation.Transactional;
 import tgbotgpt.model.entity.BotUser;
 import tgbotgpt.repository.BotUserRepository;
 
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -23,7 +26,7 @@ public class UserSettingsService {
     @Value("${openai.systemprompt}")
     private String defaultSystemPrompt;
 
-    @Value("${openai.allowed.models:gpt-4o-mini,gpt-4o,gpt-4-turbo,gpt-3.5-turbo}")
+    @Value("${openai.allowed.models:gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o}")
     private String allowedModelsString;
 
     @Value("${bot.prompt.max.length:500}")
@@ -38,7 +41,10 @@ public class UserSettingsService {
 
     @PostConstruct
     private void init() {
-        allowedModels = Set.of(allowedModelsString.split(","));
+        allowedModels = Arrays.stream(allowedModelsString.split(","))
+                .map(String::trim)
+                .filter(model -> !model.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     public String getModel(Long userId) {

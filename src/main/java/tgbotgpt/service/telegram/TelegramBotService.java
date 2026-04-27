@@ -432,7 +432,9 @@ public class TelegramBotService {
 
         if (text.equalsIgnoreCase("/model")) {
             String current = gptService.getUserModel(userId);
-            sendReply(update, "Current model: " + current + "\nUsage: /model <name>");
+            sendReply(update, "Current model: " + current
+                    + "\nAvailable: " + gptService.getAvailableModels()
+                    + "\nUsage: /model <name>");
             return;
         }
 

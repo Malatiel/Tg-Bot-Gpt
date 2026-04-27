@@ -30,6 +30,12 @@ All notable changes are documented here. The format follows
 - New metrics: `tgbotgpt.executor.rejected`, `tgbotgpt.telegram.retry`.
 
 ### Changed
+- Default model is now configurable via `OPENAI_MODEL` and defaults to
+  `gpt-5.4-nano`, the lowest-cost GPT-5.4-class model.
+- Allowed user-selectable models are now configurable via
+  `OPENAI_ALLOWED_MODELS` and include `gpt-5.4-nano` and `gpt-5.4-mini`.
+- `/model` now shows the available model list when displaying the current
+  user selection.
 - `BotStatusService` no longer opens its own DB connection; DB and OpenAI
   status are now read from the actuator `HealthEndpoint`. The `/status`
   output gains an `OpenAI:` line.

@@ -137,21 +137,31 @@ class GptServiceTest {
 
     @Test
     void shouldSetUserModel() {
-        when(userSettings.setModel(1L, "gpt-4o")).thenReturn(true);
+        when(userSettings.setModel(1L, "gpt-5.4-mini")).thenReturn(true);
 
-        String result = gptService.setUserModel(1L, "gpt-4o");
+        String result = gptService.setUserModel(1L, "gpt-5.4-mini");
 
-        assertEquals("Model set to: gpt-4o", result);
+        assertEquals("Model set to: gpt-5.4-mini", result);
     }
 
     @Test
     void shouldRejectInvalidModel() {
         when(userSettings.setModel(1L, "invalid")).thenReturn(false);
-        when(userSettings.getAllowedModels()).thenReturn(java.util.Set.of("gpt-4o-mini", "gpt-4o"));
+        when(userSettings.getAllowedModels()).thenReturn(java.util.Set.of("gpt-5.4-nano", "gpt-5.4-mini"));
 
         String result = gptService.setUserModel(1L, "invalid");
 
         assertTrue(result.contains("Unknown model"));
+    }
+
+    @Test
+    void shouldExposeAvailableModels() {
+        when(userSettings.getAllowedModels()).thenReturn(java.util.Set.of("gpt-5.4-nano", "gpt-5.4-mini"));
+
+        String result = gptService.getAvailableModels();
+
+        assertTrue(result.contains("gpt-5.4-nano"));
+        assertTrue(result.contains("gpt-5.4-mini"));
     }
 
     @Test
@@ -485,10 +495,11 @@ class GptServiceTest {
     }
 
     @Test
-    void shouldFallbackVisionModelForNonGpt4o() {
+    void shouldFallbackVisionModelForNonVisionModel() {
         Update update = createPrivateUpdate(1L, null);
         when(rateLimiter.isAllowed(1L)).thenReturn(true);
         when(userSettings.getModel(1L)).thenReturn("gpt-3.5-turbo");
+        when(userSettings.getDefaultModel()).thenReturn("gpt-5.4-nano");
         when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
         when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
         when(userSettings.containsInjection(any())).thenReturn(false);
@@ -496,7 +507,22 @@ class GptServiceTest {
 
         gptService.sendVisionMessage(update, "base64", "image/jpeg", "Describe");
 
-        verify(client).getCompletion(argThat(req -> "gpt-4o-mini".equals(req.getModel())));
+        verify(client).getCompletion(argThat(req -> "gpt-5.4-nano".equals(req.getModel())));
+    }
+
+    @Test
+    void shouldKeepGpt54ForVision() {
+        Update update = createPrivateUpdate(1L, null);
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-5.4-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection(any())).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("ok")));
+
+        gptService.sendVisionMessage(update, "base64", "image/jpeg", "Describe");
+
+        verify(client).getCompletion(argThat(req -> "gpt-5.4-mini".equals(req.getModel())));
     }
 
     @Test

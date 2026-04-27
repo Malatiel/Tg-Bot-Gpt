@@ -17,6 +17,8 @@ development see [README.md](README.md).
 | `ENCRYPTION_REQUIRED`        | optional (`true`)  | `true` in prod by default — startup fails if key missing/invalid     |
 | `BOT_OWNER_IDS`              | recommended        | Comma-separated Telegram user IDs allowed to run `/status`           |
 | `OPENAI_API_MODE`            | optional           | `responses` (default) or `chat`                                      |
+| `OPENAI_MODEL`               | optional           | Default model; `gpt-5.4-nano` by default for lowest GPT-5.4 cost     |
+| `OPENAI_ALLOWED_MODELS`      | optional           | Comma-separated models users can choose with `/model <name>`         |
 | `BOT_WHITELIST`              | optional           | Comma-separated user IDs/usernames/group names; empty = open access  |
 
 ## Profiles

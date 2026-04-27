@@ -7,7 +7,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - Chat with OpenAI GPT models via Telegram
 - **PostgreSQL persistence** — user settings, chat history, and usage stats saved to DB
 - **Custom system prompts** — each user can personalize bot behavior via `/prompt`
-- **Image analysis** — send a photo and a vision-capable GPT-4o model will describe/analyze it
+- **Image analysis** — send a photo and a vision-capable GPT model will describe/analyze it
 - **Document analysis** — send a PDF or TXT file for GPT to analyze (with optional caption as instruction)
 - **Streaming responses** — bot edits its message in real-time as tokens arrive
 - **Per-user model selection** — each user can switch GPT models via `/model`
@@ -70,6 +70,8 @@ BOT_TOKEN=your-telegram-bot-token
 BOT_OWNER_IDS=your-telegram-user-id
 OPENAI_APIKEY=your-openai-api-key
 OPENAI_API_MODE=responses
+OPENAI_MODEL=gpt-5.4-nano
+OPENAI_ALLOWED_MODELS=gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o
 SPRING_PROFILES_ACTIVE=dev
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your-postgres-password
@@ -95,6 +97,8 @@ export BOT_TOKEN=your-telegram-bot-token
 export BOT_OWNER_IDS=your-telegram-user-id
 export OPENAI_APIKEY=your-openai-api-key
 export OPENAI_API_MODE=responses
+export OPENAI_MODEL=gpt-5.4-nano
+export OPENAI_ALLOWED_MODELS=gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o
 export SPRING_PROFILES_ACTIVE=dev
 export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/tgbotgpt
 export SPRING_DATASOURCE_USERNAME=postgres
@@ -140,11 +144,11 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `openai.api.mode`              | OpenAI API mode: `responses` or `chat` | `responses`          |
 | `openai.url`                   | OpenAI Chat Completions endpoint     | `https://api.openai.com/v1/chat/completions` |
 | `openai.responses.url`         | OpenAI Responses API endpoint        | `https://api.openai.com/v1/responses` |
-| `openai.model`                 | Default OpenAI model                 | `gpt-4o-mini`         |
+| `openai.model`                 | Default OpenAI model                 | `${OPENAI_MODEL:gpt-5.4-nano}` |
 | `openai.temperature`           | Response creativity (0.0 - 1.0)      | `0.7`                 |
 | `openai.maxtokens`             | Max tokens per response              | `3000`                |
 | `openai.max.message.pool.size` | Recent messages loaded from DB as context | `7`                   |
-| `openai.allowed.models`        | Comma-separated allowed models       | `gpt-4o-mini,gpt-4o` |
+| `openai.allowed.models`        | Comma-separated models users can choose via `/model <name>` | `${OPENAI_ALLOWED_MODELS:gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o}` |
 | `bot.whitelist`                | Allowed user IDs/usernames (empty = all) | empty             |
 | `bot.rate.limit`               | Max requests per user per window     | `10`                  |
 | `bot.rate.window.seconds`      | Rate limit window in seconds         | `60`                  |

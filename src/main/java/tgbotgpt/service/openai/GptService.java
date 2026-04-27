@@ -189,8 +189,8 @@ public class GptService {
             Message visionMsg = Message.ofVision(caption, base64Image, mimeType);
             String systemPrompt = userSettings.getSystemPrompt(userId);
             String userModel = userSettings.getModel(userId);
-            if (!userModel.startsWith("gpt-4o")) {
-                userModel = "gpt-4o-mini";
+            if (!supportsImageInput(userModel)) {
+                userModel = userSettings.getDefaultModel();
             }
 
             ChatRequest chatRequest = new ChatRequest();
@@ -362,6 +362,10 @@ public class GptService {
         return userSettings.getModel(userId);
     }
 
+    public String getAvailableModels() {
+        return String.join(", ", userSettings.getAllowedModels());
+    }
+
     public String setUserPrompt(Long userId, String prompt) {
         return userSettings.setCustomPrompt(userId, prompt);
     }
@@ -469,6 +473,13 @@ public class GptService {
 
     private Integer totalTokens(Usage usage) {
         return usage != null ? usage.getTotalTokens() : null;
+    }
+
+    private boolean supportsImageInput(String model) {
+        return model != null && (
+                model.startsWith("gpt-5.4") ||
+                model.startsWith("gpt-4o")
+        );
     }
 
     private boolean useResponsesApi() {

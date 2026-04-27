@@ -15,9 +15,9 @@ import static org.junit.jupiter.api.Assertions.*;
 @Import(UserSettingsService.class)
 @ActiveProfiles("test")
 @TestPropertySource(properties = {
-        "openai.model=gpt-4o-mini",
+        "openai.model=gpt-5.4-nano",
         "openai.systemprompt=Default prompt",
-        "openai.allowed.models=gpt-4o-mini,gpt-4o,gpt-4-turbo",
+        "openai.allowed.models=gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o",
         "bot.prompt.max.length=500"
 })
 class UserSettingsServiceTest {
@@ -30,17 +30,17 @@ class UserSettingsServiceTest {
 
     @Test
     void shouldReturnDefaultModelForNewUser() {
-        assertEquals("gpt-4o-mini", service.getModel(1L));
+        assertEquals("gpt-5.4-nano", service.getModel(1L));
     }
 
     @Test
     void shouldSetAndPersistModel() {
-        assertTrue(service.setModel(1L, "gpt-4o"));
-        assertEquals("gpt-4o", service.getModel(1L));
+        assertTrue(service.setModel(1L, "gpt-5.4-mini"));
+        assertEquals("gpt-5.4-mini", service.getModel(1L));
 
         // Verify it's in DB
         BotUser user = userRepository.findById(1L).orElseThrow();
-        assertEquals("gpt-4o", user.getSelectedModel());
+        assertEquals("gpt-5.4-mini", user.getSelectedModel());
     }
 
     @Test
@@ -54,17 +54,17 @@ class UserSettingsServiceTest {
         user.setSelectedModel("removed-model");
         userRepository.save(user);
 
-        assertEquals("gpt-4o-mini", service.getModel(1L));
+        assertEquals("gpt-5.4-nano", service.getModel(1L));
     }
 
     @Test
     void shouldTrackModelsPerUser() {
         service.setModel(1L, "gpt-4o");
-        service.setModel(2L, "gpt-4-turbo");
+        service.setModel(2L, "gpt-5.4-mini");
 
         assertEquals("gpt-4o", service.getModel(1L));
-        assertEquals("gpt-4-turbo", service.getModel(2L));
-        assertEquals("gpt-4o-mini", service.getModel(3L));
+        assertEquals("gpt-5.4-mini", service.getModel(2L));
+        assertEquals("gpt-5.4-nano", service.getModel(3L));
     }
 
     @Test
