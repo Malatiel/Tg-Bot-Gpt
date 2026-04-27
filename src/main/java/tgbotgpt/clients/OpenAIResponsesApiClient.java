@@ -84,8 +84,17 @@ public class OpenAIResponsesApiClient {
                         .bodyToFlux(SSE_TYPE)
                         .filter(event -> event.data() != null && !"[DONE]".equals(event.data()))
                         .map(event -> parseStreamEvent(event.data()))
-                        .map(this::toStreamChunk)
-                        .filter(Objects::nonNull))
+                        .<StreamChunk>handle((event, sink) -> {
+                            OpenAiClientException streamError = toStreamError(event);
+                            if (streamError != null) {
+                                sink.error(streamError);
+                                return;
+                            }
+                            StreamChunk chunk = toStreamChunk(event);
+                            if (chunk != null) {
+                                sink.next(chunk);
+                            }
+                        }))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
                 .onErrorMap(this::mapTransportError)
                 .retryWhen(retrySpec());
@@ -230,6 +239,33 @@ public class OpenAIResponsesApiClient {
         return "response.completed".equals(event.getType());
     }
 
+    private boolean isErrorEvent(ResponsesStreamEvent event) {
+        return "error".equals(event.getType()) || "response.failed".equals(event.getType());
+    }
+
+    private OpenAiClientException toStreamError(ResponsesStreamEvent event) {
+        if (!isErrorEvent(event)) {
+            return null;
+        }
+
+        ResponsesError error = event.getError();
+        if (error == null && event.getResponse() != null) {
+            error = event.getResponse().getError();
+        }
+
+        String message = "OpenAI Responses API stream failed";
+        String code = null;
+        if (error != null) {
+            code = error.getCode();
+            if (error.getMessage() != null && !error.getMessage().isBlank()) {
+                message += ": " + error.getMessage().trim();
+            } else if (code != null && !code.isBlank()) {
+                message += ": " + code;
+            }
+        }
+        return new OpenAiClientException(message, isRetryableStreamError(code));
+    }
+
     private StreamChunk toStreamChunk(ResponsesStreamEvent event) {
         if (isTextDeltaEvent(event)) {
             return toTextStreamChunk(event.getDelta());
@@ -290,5 +326,9 @@ public class OpenAIResponsesApiClient {
 
     private boolean isRetryableStatus(int statusCode) {
         return statusCode == 429 || statusCode >= 500;
+    }
+
+    private boolean isRetryableStreamError(String code) {
+        return "rate_limit_exceeded".equals(code) || "server_error".equals(code);
     }
 }

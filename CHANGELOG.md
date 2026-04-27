@@ -39,6 +39,15 @@ All notable changes are documented here. The format follows
 - `ChatHistoryService.cleanupOldMessages` cron is now configurable.
 
 ### Fixed
+- Docker builds now clear the Maven image's default `MAVEN_CONFIG` before
+  invoking the project wrapper, preventing `/root/.m2` from being parsed as a
+  Maven lifecycle phase.
+- Docker Compose now uses PostgreSQL 16 and a project-specific database volume
+  to avoid reusing incompatible local Postgres data directories.
+- Responses API streaming now ignores non-text service events without failing
+  the Reactor pipeline.
+- Responses API streaming now treats `error` and `response.failed` events as
+  OpenAI client errors instead of producing an empty Telegram response.
 - `TelegramBotService.dispose()` previously returned immediately on
   `executorService.shutdown()`, dropping in-flight requests on every deploy.
   Now waits up to the configured timeout, then forces.

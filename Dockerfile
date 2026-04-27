@@ -6,7 +6,7 @@ COPY .mvn .mvn
 COPY mvnw mvnw
 COPY mvnw.cmd mvnw.cmd
 COPY src src
-RUN chmod +x mvnw && ./mvnw -q -DskipTests package
+RUN chmod +x mvnw && MAVEN_CONFIG= ./mvnw -q -DskipTests package
 
 FROM eclipse-temurin:22-jre
 WORKDIR /app

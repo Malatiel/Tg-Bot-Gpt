@@ -95,6 +95,53 @@ class OpenAIResponsesApiClientTest {
     }
 
     @Test
+    void shouldIgnoreNonTextStreamingEvents() {
+        OpenAIResponsesApiClient client = createClient(request -> Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                .body("""
+                        data: {"type":"response.created","response":{"id":"resp_1"}}
+
+                        data: {"type":"response.output_item.added","item":{"type":"message"}}
+
+                        data: {"type":"response.output_text.delta","delta":"Hello"}
+
+                        data: {"type":"response.completed","response":{"usage":{"total_tokens":5}}}
+
+                        data: [DONE]
+
+                        """)
+                .build()));
+
+        List<StreamChunk> chunks = client.getCompletionStream(chatRequest()).collectList().block();
+
+        assertNotNull(chunks);
+        assertEquals(2, chunks.size());
+        assertEquals("Hello", chunks.get(0).getChoices().get(0).getDelta().getContentAsString());
+        assertEquals(5, chunks.get(1).getUsage().getTotalTokens());
+    }
+
+    @Test
+    void shouldFailOnStreamingErrorEvent() {
+        OpenAIResponsesApiClient client = createClient(request -> Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                .body("""
+                        data: {"type":"response.created","response":{"id":"resp_1"}}
+
+                        data: {"type":"error","error":{"type":"insufficient_quota","code":"insufficient_quota","message":"Quota exceeded."}}
+
+                        data: {"type":"response.failed","response":{"error":{"code":"insufficient_quota","message":"Quota exceeded."}}}
+
+                        """)
+                .build()));
+
+        OpenAiClientException error = assertThrows(OpenAiClientException.class,
+                () -> client.getCompletionStream(chatRequest()).collectList().block());
+
+        assertFalse(error.isRetryable());
+        assertTrue(error.getMessage().contains("Quota exceeded."));
+    }
+
+    @Test
     void shouldConvertChatRequestToResponsesRequest() {
         OpenAIResponsesApiClient client = createClient(request -> Mono.just(jsonResponse(HttpStatus.OK, "{}")));
         ChatRequest request = chatRequest();

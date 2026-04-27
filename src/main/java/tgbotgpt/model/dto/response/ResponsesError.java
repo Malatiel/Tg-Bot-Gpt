@@ -6,17 +6,17 @@ import lombok.Data;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ResponsesStreamEvent {
+public class ResponsesError {
 
     @JsonProperty("type")
     private String type;
 
-    @JsonProperty("delta")
-    private String delta;
+    @JsonProperty("code")
+    private String code;
 
-    @JsonProperty("response")
-    private ResponsesResponse response;
+    @JsonProperty("message")
+    private String message;
 
-    @JsonProperty("error")
-    private ResponsesError error;
+    @JsonProperty("param")
+    private String param;
 }

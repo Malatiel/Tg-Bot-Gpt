@@ -25,4 +25,7 @@ public class ResponsesResponse {
 
     @JsonProperty("usage")
     private Usage usage;
+
+    @JsonProperty("error")
+    private ResponsesError error;
 }
