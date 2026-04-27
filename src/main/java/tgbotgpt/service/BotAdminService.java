@@ -72,6 +72,7 @@ public class BotAdminService {
                 Default model: %s
                 Streaming: %s
                 Database: %s
+                OpenAI: %s
                 """,
                 status.applicationName(),
                 status.version(),
@@ -80,7 +81,8 @@ public class BotAdminService {
                 status.apiMode(),
                 status.defaultModel(),
                 status.streamingEnabled() ? "enabled" : "disabled",
-                status.databaseStatus()
+                status.databaseStatus(),
+                status.openAiStatus()
         ).strip();
     }
 

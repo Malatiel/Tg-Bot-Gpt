@@ -19,6 +19,7 @@ import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
+import tgbotgpt.service.health.OpenAiHealthIndicator;
 import tgbotgpt.utils.UpdateUtils;
 
 import tgbotgpt.model.entity.ChatMessage;
@@ -40,6 +41,7 @@ public class GptService {
     private final ChatHistoryService chatHistory;
     private final BotMetricsService metrics;
     private final BotAdminService adminService;
+    private final OpenAiHealthIndicator openAiHealth;
 
     @Value("${openai.maxtokens}")
     private Integer maxtokens;
@@ -62,7 +64,7 @@ public class GptService {
 
     public GptService(OpenAIApiClient client, OpenAIResponsesApiClient responsesClient, Environment env, RateLimiter rateLimiter,
                       UserSettingsService userSettings, ChatHistoryService chatHistory, BotMetricsService metrics,
-                      BotAdminService adminService) {
+                      BotAdminService adminService, OpenAiHealthIndicator openAiHealth) {
         this.client = client;
         this.responsesClient = responsesClient;
         this.env = env;
@@ -71,6 +73,7 @@ public class GptService {
         this.chatHistory = chatHistory;
         this.metrics = metrics;
         this.adminService = adminService;
+        this.openAiHealth = openAiHealth;
     }
 
     public int getNumTokens() {
@@ -437,25 +440,31 @@ public class GptService {
     }
 
     private reactor.core.publisher.Mono<ChatResponse> getCompletion(ChatRequest chatRequest) {
-        if (useResponsesApi()) {
-            return responsesClient.getCompletion(chatRequest)
-                    .doOnSubscribe(subscription -> metrics.recordOpenAiRequest(apiMode, "completion"))
-                    .doOnError(error -> metrics.recordOpenAiError(apiMode, "completion", error));
-        }
-        return client.getCompletion(chatRequest)
+        return chooseCompletionClient(chatRequest)
                 .doOnSubscribe(subscription -> metrics.recordOpenAiRequest(apiMode, "completion"))
-                .doOnError(error -> metrics.recordOpenAiError(apiMode, "completion", error));
+                .doOnSuccess(response -> openAiHealth.recordSuccess())
+                .doOnError(error -> {
+                    metrics.recordOpenAiError(apiMode, "completion", error);
+                    openAiHealth.recordFailure(error.getClass().getSimpleName());
+                });
     }
 
     private Flux<StreamChunk> getCompletionStream(ChatRequest chatRequest) {
-        if (useResponsesApi()) {
-            return responsesClient.getCompletionStream(chatRequest)
-                    .doOnSubscribe(subscription -> metrics.recordOpenAiRequest(apiMode, "stream"))
-                    .doOnError(error -> metrics.recordOpenAiError(apiMode, "stream", error));
-        }
-        return client.getCompletionStream(chatRequest)
+        return chooseStreamClient(chatRequest)
                 .doOnSubscribe(subscription -> metrics.recordOpenAiRequest(apiMode, "stream"))
-                .doOnError(error -> metrics.recordOpenAiError(apiMode, "stream", error));
+                .doOnComplete(openAiHealth::recordSuccess)
+                .doOnError(error -> {
+                    metrics.recordOpenAiError(apiMode, "stream", error);
+                    openAiHealth.recordFailure(error.getClass().getSimpleName());
+                });
+    }
+
+    private reactor.core.publisher.Mono<ChatResponse> chooseCompletionClient(ChatRequest chatRequest) {
+        return useResponsesApi() ? responsesClient.getCompletion(chatRequest) : client.getCompletion(chatRequest);
+    }
+
+    private Flux<StreamChunk> chooseStreamClient(ChatRequest chatRequest) {
+        return useResponsesApi() ? responsesClient.getCompletionStream(chatRequest) : client.getCompletionStream(chatRequest);
     }
 
     private Integer totalTokens(Usage usage) {

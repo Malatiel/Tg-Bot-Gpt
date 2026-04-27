@@ -40,6 +40,16 @@ public class BotMetricsService {
         ).increment();
     }
 
+    public void recordExecutorRejection() {
+        meterRegistry.counter("tgbotgpt.executor.rejected").increment();
+    }
+
+    public void recordTelegramRetry(String operation) {
+        meterRegistry.counter("tgbotgpt.telegram.retry",
+                "operation", normalize(operation)
+        ).increment();
+    }
+
     private String errorType(Throwable error) {
         if (error == null) {
             return "unknown";

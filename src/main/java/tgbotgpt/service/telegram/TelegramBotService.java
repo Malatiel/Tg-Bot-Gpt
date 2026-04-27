@@ -5,9 +5,11 @@ import com.pengrad.telegrambot.UpdatesListener;
 import com.pengrad.telegrambot.model.*;
 import com.pengrad.telegrambot.model.request.ParseMode;
 import com.pengrad.telegrambot.model.request.ReplyKeyboardRemove;
+import com.pengrad.telegrambot.request.BaseRequest;
 import com.pengrad.telegrambot.request.EditMessageText;
 import com.pengrad.telegrambot.request.GetFile;
 import com.pengrad.telegrambot.request.SendMessage;
+import com.pengrad.telegrambot.response.BaseResponse;
 import com.pengrad.telegrambot.response.GetFileResponse;
 import com.pengrad.telegrambot.response.SendResponse;
 import jakarta.annotation.PostConstruct;
@@ -27,8 +29,11 @@ import tgbotgpt.utils.UpdateUtils;
 
 import java.util.List;
 
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -52,9 +57,17 @@ public class TelegramBotService {
     private String presentationText;
     @Value("${bot.stream.enabled:true}")
     private boolean streamEnabled;
+    @Value("${bot.executor.threads:0}")
+    private int executorThreads;
+    @Value("${bot.executor.queue.size:128}")
+    private int executorQueueSize;
+    @Value("${bot.shutdown.timeout.seconds:30}")
+    private int shutdownTimeoutSeconds;
+    @Value("${bot.telegram.retry.max.backoff.ms:5000}")
+    private long telegramRetryMaxBackoffMs;
 
     private TelegramBot bot;
-    private final ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    private ThreadPoolExecutor executorService;
 
     public TelegramBotService(GptService gptService, ImageService imageService, DocumentService documentService,
                               BotAdminService adminService, BotMetricsService metrics) {
@@ -67,20 +80,58 @@ public class TelegramBotService {
 
     @PostConstruct
     private void init() {
+        int threads = executorThreads > 0 ? executorThreads : Runtime.getRuntime().availableProcessors();
+        executorService = new ThreadPoolExecutor(
+                threads, threads,
+                0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(executorQueueSize),
+                new ThreadPoolExecutor.AbortPolicy()
+        );
+
         this.bot = new TelegramBot(botToken);
-        bot.setUpdatesListener(updates -> {
-            for (Update update : updates) {
+        bot.setUpdatesListener(this::handleUpdates);
+    }
+
+    /**
+     * Submits updates one-by-one and returns the highest update_id we successfully
+     * accepted. If the bounded queue rejects an update, we stop and let Telegram
+     * redeliver from that point on the next long-poll. This prevents both unbounded
+     * memory growth and silent loss of unprocessed updates.
+     */
+    int handleUpdates(java.util.List<Update> updates) {
+        int lastConfirmed = UpdatesListener.CONFIRMED_UPDATES_NONE;
+        for (Update update : updates) {
+            try {
                 executorService.submit(() -> processUpdate(update));
+                lastConfirmed = update.updateId();
+            } catch (RejectedExecutionException rejected) {
+                metrics.recordExecutorRejection();
+                log.warn("Executor saturated; deferring update {} for redelivery", update.updateId());
+                break;
             }
-            return UpdatesListener.CONFIRMED_UPDATES_ALL;
-        });
+        }
+        return lastConfirmed;
     }
 
     @PreDestroy
     private void dispose() {
-        log.info("Shutting down bot");
-        bot.shutdown();
+        log.info("Shutting down bot (graceful timeout {}s)", shutdownTimeoutSeconds);
+        // 1. Stop polling for new updates so the executor queue can stop growing.
+        bot.removeGetUpdatesListener();
+        // 2. Drain in-flight tasks BEFORE closing the HTTP client — otherwise
+        //    sendReply / editMessage / GetFile in running tasks would fail.
         executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(shutdownTimeoutSeconds, TimeUnit.SECONDS)) {
+                log.warn("Executor did not terminate in {}s; forcing shutdownNow", shutdownTimeoutSeconds);
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            executorService.shutdownNow();
+        }
+        // 3. Close the HTTP client only after the executor is drained.
+        bot.shutdown();
     }
 
     private void processUpdate(Update update) {
@@ -245,13 +296,48 @@ public class TelegramBotService {
 
     private void editMessage(long chatId, int messageId, String text) {
         try {
-            com.pengrad.telegrambot.response.BaseResponse response =
-                    bot.execute(new EditMessageText(chatId, messageId, TelegramUtils.truncateForEdit(text)));
+            BaseResponse response = executeWithRetry(
+                    new EditMessageText(chatId, messageId, TelegramUtils.truncateForEdit(text)),
+                    "edit");
             metrics.recordTelegramEdit(response.isOk());
         } catch (Exception e) {
             metrics.recordTelegramEdit(false);
             log.error("Failed to edit message: ", e);
         }
+    }
+
+    /**
+     * Honors Telegram's 429 retry_after once. If retry_after exceeds the
+     * configured backoff cap we skip the retry rather than sleep-and-fail —
+     * sleeping the cap and resending is guaranteed to be rate-limited again.
+     * Other failures (4xx other than 429) are returned as-is — caller decides
+     * whether to fall back (e.g. plain-text after Markdown 400).
+     */
+    <T extends BaseResponse> T executeWithRetry(BaseRequest<?, T> request, String operation) {
+        T response = bot.execute(request);
+        if (response.isOk() || response.errorCode() != 429) {
+            return response;
+        }
+        Integer retryAfter = response.parameters() != null ? response.parameters().retryAfter() : null;
+        if (retryAfter == null) {
+            return response;
+        }
+        long sleepMs = retryAfter * 1000L;
+        if (sleepMs > telegramRetryMaxBackoffMs) {
+            log.warn("Telegram {} retry_after {}s exceeds {}ms cap; skipping retry",
+                    operation, retryAfter, telegramRetryMaxBackoffMs);
+            metrics.recordTelegramRetry(operation + ".skipped");
+            return response;
+        }
+        log.warn("Telegram {} rate-limited; retry_after={}s", operation, retryAfter);
+        metrics.recordTelegramRetry(operation);
+        try {
+            Thread.sleep(sleepMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return response;
+        }
+        return bot.execute(request);
     }
 
     private void sendLongReply(Update update, String message) {
@@ -262,11 +348,11 @@ public class TelegramBotService {
     }
 
     private void sendReply(Update update, String message) {
-        SendResponse sendResponse = bot.execute(buildSendMessage(update, message, true));
+        SendResponse sendResponse = executeWithRetry(buildSendMessage(update, message, true), "send");
         metrics.recordTelegramSend(true, sendResponse.isOk());
         if (!sendResponse.isOk()) {
             log.warn("Failed to send Markdown message: {}", sendResponse.description());
-            SendResponse plainResponse = bot.execute(buildSendMessage(update, message, false));
+            SendResponse plainResponse = executeWithRetry(buildSendMessage(update, message, false), "send");
             metrics.recordTelegramSend(false, plainResponse.isOk());
             if (!plainResponse.isOk()) {
                 log.error("Failed to send plain message: {}", plainResponse.description());

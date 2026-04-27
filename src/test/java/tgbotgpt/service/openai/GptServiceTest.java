@@ -53,12 +53,14 @@ class GptServiceTest {
     private BotMetricsService metrics;
     @Mock
     private BotAdminService adminService;
+    @Mock
+    private tgbotgpt.service.health.OpenAiHealthIndicator openAiHealth;
 
     private GptService gptService;
 
     @BeforeEach
     void setUp() {
-        gptService = new GptService(client, responsesClient, env, rateLimiter, userSettings, chatHistory, metrics, adminService);
+        gptService = new GptService(client, responsesClient, env, rateLimiter, userSettings, chatHistory, metrics, adminService, openAiHealth);
         ReflectionTestUtils.setField(gptService, "maxtokens", 3000);
         ReflectionTestUtils.setField(gptService, "temperature", 0.7);
         ReflectionTestUtils.setField(gptService, "defaultSystemPrompt", "You are a helpful assistant.");

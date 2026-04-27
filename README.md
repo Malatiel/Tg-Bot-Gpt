@@ -125,7 +125,7 @@ Set `ENCRYPTION_REQUIRED=true` to fail startup if the key is missing or invalid.
 
 ### 5. Production profile
 
-For production, run with `SPRING_PROFILES_ACTIVE=prod`. The `prod` profile runs Flyway migrations, uses `spring.jpa.hibernate.ddl-auto=validate`, requires explicit datasource environment variables, and requires encryption by default.
+For production, run with `SPRING_PROFILES_ACTIVE=prod`. See [DEPLOY.md](DEPLOY.md) for the full runbook. The `prod` profile runs Flyway migrations, uses `spring.jpa.hibernate.ddl-auto=validate`, requires explicit datasource environment variables, requires encryption by default, logs to stdout only, and uses graceful shutdown.
 
 Database migrations live in `src/main/resources/db/migration`. Flyway is disabled in `dev` (Hibernate manages the schema via `ddl-auto=update`); set `SPRING_FLYWAY_ENABLED=true` to opt in. When enabling `prod` against a database that was previously managed by Hibernate, set `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` for the first run.
 
@@ -159,8 +159,15 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `bot.prompt.max.length`        | Max custom prompt length             | `500`                 |
 | `bot.image.max.size.mb`        | Max image size in MB                 | `10`                  |
 | `bot.image.allowed.types`      | Allowed MIME types for image analysis | `image/jpeg,image/png,image/gif,image/webp` |
-| `management.server.port`      | Actuator HTTP port                   | `8081`                |
-| `management.server.address`   | Actuator bind address                | `127.0.0.1`           |
+| `bot.executor.threads`         | Update-handler thread pool size; `0` = #CPUs | `0`              |
+| `bot.executor.queue.size`      | Bounded queue size for pending updates; rejected updates are redelivered by Telegram | `128` |
+| `bot.shutdown.timeout.seconds` | Graceful shutdown timeout before `shutdownNow()` | `30`              |
+| `bot.telegram.retry.max.backoff.ms` | Cap on Telegram 429 `retry_after` we'll honor; longer waits skip the retry. Sleeping blocks an executor worker — raise only if you have headroom | `10000` |
+| `bot.history.retention.days`   | How long chat history is kept before nightly cleanup | `30`              |
+| `bot.history.cleanup.cron`     | Spring cron expression for the cleanup job | `0 0 3 * * *`    |
+| `openai.health.freshness.seconds` | Window after which an OpenAI outcome is considered stale by the health indicator | `300` |
+| `management.server.port`       | Actuator HTTP port                   | `8081`                |
+| `management.server.address`    | Actuator bind address                | `127.0.0.1`           |
 | `management.endpoints.web.exposure.include` | Actuator endpoints exposed over HTTP | `health,info,metrics` (`health` in `prod`) |
 
 ## Security
@@ -178,9 +185,19 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - Production profile can require encryption at startup
 - Automatic cleanup of old chat history (30-day retention)
 - Whitelist support for restricting bot access
-- Owner-only `/status` command reports runtime health without tokens, keys, or user content
+- Owner-only `/status` command reports runtime health (aggregate, DB, OpenAI) without tokens, keys, or user content
 - Actuator binds to `127.0.0.1:8081` by default; the `prod` profile exposes only `/actuator/health`
 - Streaming OpenAI responses include usage accounting so `/usage` tracks token totals for streaming users
+
+## Reliability
+
+- **Backpressure.** Updates are processed through a bounded `ThreadPoolExecutor`. If the queue is full, the listener returns the last successfully submitted `update_id` and Telegram redelivers the rest on the next long-poll. No silent loss, no unbounded memory growth.
+- **Graceful shutdown.** On SIGTERM the updates listener is removed first, the executor is given `bot.shutdown.timeout.seconds` to drain, then `shutdownNow()` is called. In-flight OpenAI calls have a chance to finish on every deploy.
+- **Telegram 429 handling.** `sendMessage` and `editMessage` honour `retry_after` once. If the server asks for a wait longer than `bot.telegram.retry.max.backoff.ms`, the retry is skipped instead of blocking an executor thread on a guaranteed-to-fail repeat.
+- **OpenAI health indicator.** A custom `openai` health component reports `UP`, `DEGRADED` (recent failure within the freshness window), or `UNKNOWN`. Surfaced via `/actuator/health` (when exposure permits) and the owner-only `/status`.
+- **Container-friendly defaults.** `prod` logs to stdout only; the Dockerfile sets `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError`.
+
+See [DEPLOY.md](DEPLOY.md) for production runbook and [CHANGELOG.md](CHANGELOG.md) for the release log.
 
 ## License
 

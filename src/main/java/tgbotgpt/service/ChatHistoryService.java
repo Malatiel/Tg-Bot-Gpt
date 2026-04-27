@@ -1,6 +1,7 @@
 package tgbotgpt.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -15,10 +16,11 @@ import java.util.List;
 @Service
 public class ChatHistoryService {
 
-    private static final int MAX_HISTORY_DAYS = 30;
-
     private final ChatMessageRepository messageRepository;
     private final EncryptionService encryption;
+
+    @Value("${bot.history.retention.days:30}")
+    private int retentionDays;
 
     public ChatHistoryService(ChatMessageRepository messageRepository, EncryptionService encryption) {
         this.messageRepository = messageRepository;
@@ -49,13 +51,13 @@ public class ChatHistoryService {
     /**
      * Cleanup old messages daily at 3 AM to prevent unbounded DB growth.
      */
-    @Scheduled(cron = "0 0 3 * * *")
+    @Scheduled(cron = "${bot.history.cleanup.cron:0 0 3 * * *}")
     @Transactional
     public void cleanupOldMessages() {
-        LocalDateTime cutoff = LocalDateTime.now().minusDays(MAX_HISTORY_DAYS);
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(retentionDays);
         int deleted = messageRepository.deleteOlderThan(cutoff);
         if (deleted > 0) {
-            log.info("Cleaned up {} messages older than {} days", deleted, MAX_HISTORY_DAYS);
+            log.info("Cleaned up {} messages older than {} days", deleted, retentionDays);
         }
     }
 }
