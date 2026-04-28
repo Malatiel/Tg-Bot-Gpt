@@ -20,6 +20,11 @@ development see [README.md](README.md).
 | `OPENAI_MODEL`               | optional           | Default model; `gpt-5.4-nano` by default for lowest GPT-5.4 cost     |
 | `OPENAI_ALLOWED_MODELS`      | optional           | Comma-separated models users can choose with `/model` buttons        |
 | `OPENAI_MAX_HISTORY_TOKENS`  | optional           | Approximate context budget for DB history, default `2000`            |
+| `BILLING_DEFAULT_PLAN`       | optional           | Plan for new users: `free` by default                                |
+| `BILLING_FREE_MONTHLY_TOKENS` | optional          | Free-plan monthly token limit                                        |
+| `BILLING_FREE_MONTHLY_MESSAGES` | optional        | Free-plan monthly message limit                                      |
+| `BILLING_PRO_MONTHLY_TOKENS` | optional           | Pro-plan monthly token limit                                         |
+| `BILLING_PRO_MONTHLY_MESSAGES` | optional         | Pro-plan monthly message limit                                       |
 | `BOT_WHITELIST`              | optional           | Comma-separated user IDs/usernames/group names; empty = open access  |
 
 ## Profiles
@@ -152,6 +157,20 @@ The Dockerfile sets `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75
 ```
 docker run -e JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=50" ...
 ```
+
+## Usage plans
+
+The bot has a billing-ready usage layer but no payment provider yet. Users are
+assigned `free` by default, owners are treated as unlimited, and owners can
+assign plans from Telegram:
+
+```text
+/balance
+/plan
+/plan set <telegram_id> <free|pro|owner>
+```
+
+Limits reset automatically when the `YYYY-MM` usage period changes.
 
 ## Backup and restore
 

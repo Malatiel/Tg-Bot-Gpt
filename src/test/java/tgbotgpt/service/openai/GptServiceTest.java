@@ -30,6 +30,7 @@ import tgbotgpt.service.UserSettingsService;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -76,6 +77,7 @@ class GptServiceTest {
         // Default: empty history from DB
         lenient().when(chatHistory.getRecentMessages(anyLong(), anyInt())).thenReturn(Collections.emptyList());
         lenient().when(adminService.isOwner(anyLong())).thenReturn(false);
+        lenient().when(userSettings.checkUsageLimit(anyLong(), anyBoolean())).thenReturn(Optional.empty());
     }
 
     @Test
@@ -523,6 +525,9 @@ class GptServiceTest {
         when(userSettings.getSystemPrompt(1L)).thenReturn("Helpful prompt");
         when(userSettings.getUserTokens(1L)).thenReturn(123);
         when(userSettings.getUserMessages(1L)).thenReturn(4);
+        when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
+                "free", "2026-04", 123, 4, 100, 2, 50000, 100
+        ));
         when(rateLimiter.getMaxRequests()).thenReturn(10);
         when(rateLimiter.getWindowSeconds()).thenReturn(60);
         when(rateLimiter.getRemainingRequests(1L)).thenReturn(7);
@@ -530,10 +535,54 @@ class GptServiceTest {
         String summary = gptService.getSettingsSummary(1L);
 
         assertTrue(summary.contains("Model: gpt-5.4-nano"));
+        assertTrue(summary.contains("Plan: FREE"));
         assertTrue(summary.contains("Prompt: Helpful prompt"));
         assertTrue(summary.contains("Usage: 123 tokens, 4 messages"));
+        assertTrue(summary.contains("This month: 100/50000 tokens, 2/100 messages"));
         assertTrue(summary.contains("Rate limit: 10 requests / 60 seconds, 7 remaining now"));
         assertTrue(summary.contains("about 2000 tokens"));
+    }
+
+    @Test
+    void shouldBlockWhenMonthlyUsageLimitReached() {
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.checkUsageLimit(1L, false)).thenReturn(Optional.of("Monthly limit reached"));
+
+        String result = gptService.sendMessage(update);
+
+        assertEquals("Monthly limit reached", result);
+        verify(rateLimiter, never()).isAllowed(anyLong());
+        verify(client, never()).getCompletion(any());
+    }
+
+    @Test
+    void shouldBuildBalanceAndPlanSummaries() {
+        when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
+                "pro", "2026-04", 1000, 20, 300, 5, 1000000, 2000
+        ));
+        when(userSettings.getMonthlyTokenLimit("free")).thenReturn(50000);
+        when(userSettings.getMonthlyMessageLimit("free")).thenReturn(100);
+        when(userSettings.getMonthlyTokenLimit("pro")).thenReturn(1000000);
+        when(userSettings.getMonthlyMessageLimit("pro")).thenReturn(2000);
+
+        String balance = gptService.getBalanceSummary(1L);
+        String plan = gptService.getPlanSummary(1L);
+
+        assertTrue(balance.contains("Plan: PRO"));
+        assertTrue(balance.contains("Tokens this month: 300/1000000"));
+        assertTrue(plan.contains("FREE - 50000 tokens/month"));
+        assertTrue(plan.contains("PRO - 1000000 tokens/month"));
+    }
+
+    @Test
+    void shouldLetOwnerSetUserBillingPlan() {
+        when(adminService.isOwner(99L)).thenReturn(true);
+        when(userSettings.setBillingPlan(1L, "pro")).thenReturn(true);
+
+        String result = gptService.setUserBillingPlan(99L, 1L, "pro");
+
+        assertEquals("Plan for 1 set to: pro", result);
     }
 
     @Test

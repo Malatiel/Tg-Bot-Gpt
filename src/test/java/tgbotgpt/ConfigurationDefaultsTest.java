@@ -47,6 +47,21 @@ class ConfigurationDefaultsTest {
     }
 
     @Test
+    void shouldDefineBillingDefaults() throws Exception {
+        Properties properties = new Properties();
+        try (InputStream stream = getClass().getClassLoader().getResourceAsStream("application.properties")) {
+            assertNotNull(stream);
+            properties.load(stream);
+        }
+
+        assertEquals("${BILLING_DEFAULT_PLAN:free}", properties.getProperty("billing.default.plan"));
+        assertEquals("${BILLING_FREE_MONTHLY_TOKENS:50000}", properties.getProperty("billing.free.monthly.tokens"));
+        assertEquals("${BILLING_FREE_MONTHLY_MESSAGES:100}", properties.getProperty("billing.free.monthly.messages"));
+        assertEquals("${BILLING_PRO_MONTHLY_TOKENS:1000000}", properties.getProperty("billing.pro.monthly.tokens"));
+        assertEquals("${BILLING_PRO_MONTHLY_MESSAGES:2000}", properties.getProperty("billing.pro.monthly.messages"));
+    }
+
+    @Test
     void shouldExposeOnlyHealthActuatorEndpointInProd() throws Exception {
         Properties properties = new Properties();
         try (InputStream stream = getClass().getClassLoader().getResourceAsStream("application-prod.properties")) {

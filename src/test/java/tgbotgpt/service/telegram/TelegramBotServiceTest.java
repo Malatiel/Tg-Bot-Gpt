@@ -226,6 +226,40 @@ class TelegramBotServiceTest {
     }
 
     @Test
+    void balanceCommandSendsBalanceSummary() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        when(gptService.getBalanceSummary(1L)).thenReturn("Balance\nPlan: FREE");
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/balance"));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot).execute(captor.capture());
+        assertEquals("Balance\nPlan: FREE", captor.getValue().getParameters().get("text"));
+    }
+
+    @Test
+    void planSetCommandDelegatesToGptService() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        when(gptService.setUserBillingPlan(1L, 2L, "pro")).thenReturn("Plan for 2 set to: pro");
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/plan set 2 pro"));
+
+        verify(gptService).setUserBillingPlan(1L, 2L, "pro");
+    }
+
+    @Test
     void streamingErrorFallsBackToNonStreamCompletion() {
         TelegramBot bot = mock(TelegramBot.class);
         GptService gptService = mock(GptService.class);

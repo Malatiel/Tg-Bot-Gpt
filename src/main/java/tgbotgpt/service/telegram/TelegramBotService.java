@@ -455,6 +455,14 @@ public class TelegramBotService {
             handleSettingsCommand(update);
             return;
         }
+        if (text.startsWith("/balance")) {
+            handleBalanceCommand(update);
+            return;
+        }
+        if (text.startsWith("/plan")) {
+            handlePlanCommand(update);
+            return;
+        }
 
         switch (text) {
             case "/start":
@@ -552,6 +560,34 @@ public class TelegramBotService {
         sendReply(update, gptService.getSettingsSummary(userId));
     }
 
+    private void handleBalanceCommand(Update update) {
+        Long userId = update.message().from().id();
+        sendReply(update, gptService.getBalanceSummary(userId));
+    }
+
+    private void handlePlanCommand(Update update) {
+        String text = update.message().text().trim();
+        Long userId = update.message().from().id();
+
+        if (text.equalsIgnoreCase("/plan")) {
+            sendReply(update, gptService.getPlanSummary(userId));
+            return;
+        }
+
+        String[] parts = text.split("\\s+");
+        if (parts.length == 4 && "set".equalsIgnoreCase(parts[1])) {
+            try {
+                Long targetUserId = Long.parseLong(parts[2]);
+                sendReply(update, gptService.setUserBillingPlan(userId, targetUserId, parts[3]));
+            } catch (NumberFormatException e) {
+                sendReply(update, "Usage: /plan set user id free|pro|owner");
+            }
+            return;
+        }
+
+        sendReply(update, "Usage: /plan or /plan set user id free|pro|owner");
+    }
+
     private void presentation(Update update) {
         String response = gptService.sendCustomMessage(update, presentationText);
         sendReply(update, response);
@@ -559,10 +595,7 @@ public class TelegramBotService {
 
     private void printUsage(Update update) {
         Long userId = update.message().from().id();
-        int tokens = gptService.getUserTokens(userId);
-        int messages = gptService.getUserMessages(userId);
-        String message = String.format("Your usage:\nTokens: %d\nMessages: %d", tokens, messages);
-        sendReply(update, message);
+        sendReply(update, gptService.getBalanceSummary(userId));
     }
 
     private void notifyOwnersOnOpenAiQuotaIssue(String response) {

@@ -3,6 +3,20 @@
 All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- Billing-ready usage plans: `free`, `pro`, and `owner`.
+- Monthly token/message counters and limits with automatic period reset.
+- `/balance` and `/plan` commands.
+- Owner-only `/plan set <telegram_id> <free|pro|owner>` command.
+- Flyway migration for plan and monthly usage columns.
+
+### Changed
+- `/usage` now shows the richer balance summary.
+- OpenAI requests are blocked before local rate-limit consumption when the
+  user's monthly plan limit is already exhausted.
+
 ## [0.3.0] — 2026-04-28 — Bot UX and operations
 
 ### Added

@@ -18,7 +18,12 @@ import static org.junit.jupiter.api.Assertions.*;
         "openai.model=gpt-5.4-nano",
         "openai.systemprompt=Default prompt",
         "openai.allowed.models=gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o",
-        "bot.prompt.max.length=500"
+        "bot.prompt.max.length=500",
+        "billing.default.plan=free",
+        "billing.free.monthly.tokens=100",
+        "billing.free.monthly.messages=2",
+        "billing.pro.monthly.tokens=1000",
+        "billing.pro.monthly.messages=20"
 })
 class UserSettingsServiceTest {
 
@@ -109,6 +114,60 @@ class UserSettingsServiceTest {
         BotUser user = userRepository.findById(1L).orElseThrow();
         assertEquals(100, user.getTotalTokensUsed());
         assertEquals(1, user.getTotalMessages());
+        assertEquals(100, user.getPeriodTokensUsed());
+        assertEquals(1, user.getPeriodMessages());
+    }
+
+    @Test
+    void shouldExposeDefaultFreeUsageStatus() {
+        UserSettingsService.UsageStatus status = service.getUsageStatus(1L, false);
+
+        assertEquals("free", status.plan());
+        assertEquals(100, status.tokenLimit());
+        assertEquals(2, status.messageLimit());
+        assertEquals(100, status.remainingTokens());
+        assertEquals(2, status.remainingMessages());
+    }
+
+    @Test
+    void shouldBlockWhenMonthlyMessageLimitReached() {
+        service.recordUsage(1L, 10);
+        service.recordUsage(1L, 10);
+
+        var blocked = service.checkUsageLimit(1L, false);
+
+        assertTrue(blocked.isPresent());
+        assertTrue(blocked.get().contains("Monthly limit reached"));
+    }
+
+    @Test
+    void shouldUseProLimitsAfterPlanChange() {
+        assertTrue(service.setBillingPlan(1L, "pro"));
+        service.recordUsage(1L, 100);
+
+        UserSettingsService.UsageStatus status = service.getUsageStatus(1L, false);
+
+        assertEquals("pro", status.plan());
+        assertEquals(1000, status.tokenLimit());
+        assertEquals(20, status.messageLimit());
+        assertEquals(900, status.remainingTokens());
+    }
+
+    @Test
+    void shouldTreatOwnerAsUnlimited() {
+        service.recordUsage(1L, 100);
+        service.recordUsage(1L, 100);
+
+        UserSettingsService.UsageStatus status = service.getUsageStatus(1L, true);
+
+        assertEquals("owner", status.plan());
+        assertTrue(status.unlimited());
+        assertTrue(service.checkUsageLimit(1L, true).isEmpty());
+    }
+
+    @Test
+    void shouldRejectUnknownBillingPlan() {
+        assertFalse(service.setBillingPlan(1L, "enterprise"));
     }
 
     @Test

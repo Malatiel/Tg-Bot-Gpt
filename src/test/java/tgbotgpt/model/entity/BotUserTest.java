@@ -25,12 +25,19 @@ class BotUserTest {
         BotUser user = new BotUser(1L, "test", "Test");
         assertEquals(0, user.getTotalTokensUsed());
         assertEquals(0, user.getTotalMessages());
+        assertEquals("free", user.getBillingPlan());
+        assertEquals(0, user.getPeriodTokensUsed());
+        assertEquals(0, user.getPeriodMessages());
 
         user.addTokens(50);
+        user.addPeriodTokens(50);
         user.incrementMessages();
+        user.incrementPeriodMessages();
 
         assertEquals(50, user.getTotalTokensUsed());
         assertEquals(1, user.getTotalMessages());
+        assertEquals(50, user.getPeriodTokensUsed());
+        assertEquals(1, user.getPeriodMessages());
     }
 
     @Test

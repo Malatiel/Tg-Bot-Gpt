@@ -35,6 +35,18 @@ public class BotUser {
     @Column(nullable = false)
     private int totalMessages;
 
+    @Column(nullable = false, length = 16, columnDefinition = "varchar(16) default 'free'")
+    private String billingPlan;
+
+    @Column(nullable = false, length = 7, columnDefinition = "varchar(7) default '1970-01'")
+    private String usagePeriod;
+
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int periodTokensUsed;
+
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int periodMessages;
+
     @Column(nullable = false)
     private LocalDateTime firstSeen;
 
@@ -47,6 +59,10 @@ public class BotUser {
         this.firstName = sanitize(firstName);
         this.totalTokensUsed = 0;
         this.totalMessages = 0;
+        this.billingPlan = "free";
+        this.usagePeriod = java.time.YearMonth.now().toString();
+        this.periodTokensUsed = 0;
+        this.periodMessages = 0;
         this.firstSeen = LocalDateTime.now();
         this.lastActive = LocalDateTime.now();
     }
@@ -58,6 +74,20 @@ public class BotUser {
     public void incrementMessages() {
         this.totalMessages++;
         this.lastActive = LocalDateTime.now();
+    }
+
+    public void addPeriodTokens(int tokens) {
+        this.periodTokensUsed += tokens;
+    }
+
+    public void incrementPeriodMessages() {
+        this.periodMessages++;
+    }
+
+    public void resetBillingPeriod(String period) {
+        this.usagePeriod = period;
+        this.periodTokensUsed = 0;
+        this.periodMessages = 0;
     }
 
     /**

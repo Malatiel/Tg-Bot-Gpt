@@ -12,6 +12,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **Streaming responses** — bot edits its message in real-time as tokens arrive
 - **Per-user model selection** — each user can switch GPT models via `/model` buttons
 - **Settings overview** — `/settings` shows model, prompt summary, usage, and limits
+- **Billing-ready usage limits** — free/pro/owner plans with monthly token/message limits
 - **Rate limiting** — configurable per-user request limit (sliding window)
 - **Message encryption** — AES-256-GCM encryption for chat messages in DB (optional)
 - **Auto-cleanup** — old messages purged from DB after 30 days
@@ -26,7 +27,10 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 | Command            | Description                              |
 |--------------------|------------------------------------------|
 | `/start`           | Bot introduction                         |
-| `/usage`           | Show your personal token/message stats   |
+| `/usage`           | Show your balance and usage stats        |
+| `/balance`         | Show current plan, monthly usage and remaining limits |
+| `/plan`            | Show available plans                     |
+| `/plan set <telegram_id> <free\|pro\|owner>` | Assign a user plan (owner only) |
 | `/reset`           | Reset conversation context + history     |
 | `/status`          | Show service status (owner only)         |
 | `/settings`        | Show model, prompt, usage, and limits    |
@@ -79,6 +83,11 @@ SPRING_PROFILES_ACTIVE=dev
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your-postgres-password
 POSTGRES_DB=tgbotgpt
+BILLING_DEFAULT_PLAN=free
+BILLING_FREE_MONTHLY_TOKENS=50000
+BILLING_FREE_MONTHLY_MESSAGES=100
+BILLING_PRO_MONTHLY_TOKENS=1000000
+BILLING_PRO_MONTHLY_MESSAGES=2000
 ENCRYPTION_KEY=optional-base64-key
 ENCRYPTION_REQUIRED=false
 ```
@@ -158,6 +167,11 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `bot.rate.limit`               | Max requests per user per window     | `10`                  |
 | `bot.rate.window.seconds`      | Rate limit window in seconds         | `60`                  |
 | `bot.stream.enabled`           | Enable streaming responses           | `true`                |
+| `billing.default.plan`         | Plan assigned to new users           | `${BILLING_DEFAULT_PLAN:free}` |
+| `billing.free.monthly.tokens`  | Monthly token limit for free users   | `${BILLING_FREE_MONTHLY_TOKENS:50000}` |
+| `billing.free.monthly.messages` | Monthly message limit for free users | `${BILLING_FREE_MONTHLY_MESSAGES:100}` |
+| `billing.pro.monthly.tokens`   | Monthly token limit for pro users    | `${BILLING_PRO_MONTHLY_TOKENS:1000000}` |
+| `billing.pro.monthly.messages` | Monthly message limit for pro users  | `${BILLING_PRO_MONTHLY_MESSAGES:2000}` |
 | `encryption.key`               | AES-256 key, base64 (empty = disabled) | empty               |
 | `encryption.required`          | Fail startup when encryption key is missing or invalid | `false` (`true` in `prod`) |
 | `bot.document.max.size.mb`     | Max document file size in MB         | `10`                  |
@@ -190,6 +204,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - Image type and size validation before processing
 - Telegram file downloads use explicit network timeouts
 - Per-user rate limiting prevents abuse and budget overruns
+- Monthly free/pro/owner plan limits prevent unbounded OpenAI spend before payment integration exists
 - Optional AES-256-GCM encryption for chat messages in DB (protects against DB dump leaks)
 - Production profile can require encryption at startup
 - Automatic cleanup of old chat history (30-day retention)

@@ -118,12 +118,18 @@ public class GptService {
         }
 
         Long userId = update.message().from().id();
+        ensureUser(update);
+
+        Optional<String> quotaBlocked = userSettings.checkUsageLimit(userId, adminService.isOwner(userId));
+        if (quotaBlocked.isPresent()) {
+            return quotaBlocked;
+        }
+
         if (!rateLimiter.isAllowed(userId)) {
             long seconds = rateLimiter.getSecondsUntilReset(userId);
             return Optional.of(String.format("Rate limit exceeded. Try again in %d seconds.", seconds));
         }
 
-        ensureUser(update);
         return Optional.empty();
     }
 
@@ -384,20 +390,28 @@ public class GptService {
     }
 
     public String getSettingsSummary(Long userId) {
+        UserSettingsService.UsageStatus usage = userSettings.getUsageStatus(userId, adminService.isOwner(userId));
         return """
                 Settings
+                Plan: %s
                 Model: %s
                 Available models: %s
                 Prompt: %s
                 Usage: %d tokens, %d messages
+                This month: %d/%s tokens, %d/%s messages
                 Rate limit: %d requests / %d seconds, %d remaining now
                 History: up to %d messages and about %d tokens
                 """.formatted(
+                usage.plan().toUpperCase(Locale.ROOT),
                 getUserModel(userId),
                 getAvailableModels(),
                 summarizePrompt(userSettings.getSystemPrompt(userId)),
                 getUserTokens(userId),
                 getUserMessages(userId),
+                usage.periodTokensUsed(),
+                formatLimit(usage.tokenLimit()),
+                usage.periodMessages(),
+                formatLimit(usage.messageLimit()),
                 rateLimiter.getMaxRequests(),
                 rateLimiter.getWindowSeconds(),
                 rateLimiter.getRemainingRequests(userId),
@@ -420,6 +434,63 @@ public class GptService {
 
     public int getUserMessages(Long userId) {
         return userSettings.getUserMessages(userId);
+    }
+
+    public String getBalanceSummary(Long userId) {
+        UserSettingsService.UsageStatus status = userSettings.getUsageStatus(userId, adminService.isOwner(userId));
+        return """
+                Balance
+                Plan: %s
+                Period: %s
+                Tokens this month: %d/%s (%s remaining)
+                Messages this month: %d/%s (%s remaining)
+                Lifetime usage: %d tokens, %d messages
+                """.formatted(
+                status.plan().toUpperCase(Locale.ROOT),
+                status.period(),
+                status.periodTokensUsed(),
+                formatLimit(status.tokenLimit()),
+                formatRemaining(status.remainingTokens()),
+                status.periodMessages(),
+                formatLimit(status.messageLimit()),
+                formatRemaining(status.remainingMessages()),
+                status.totalTokensUsed(),
+                status.totalMessages()
+        ).strip();
+    }
+
+    public String getPlanSummary(Long userId) {
+        UserSettingsService.UsageStatus status = userSettings.getUsageStatus(userId, adminService.isOwner(userId));
+        return """
+                Your plan: %s
+
+                Available plans:
+                FREE - %s tokens/month, %s messages/month
+                PRO - %s tokens/month, %s messages/month
+                OWNER - unlimited
+
+                Owners can assign a plan with:
+                /plan set user id free|pro|owner
+                """.formatted(
+                status.plan().toUpperCase(Locale.ROOT),
+                formatLimit(userSettings.getMonthlyTokenLimit("free")),
+                formatLimit(userSettings.getMonthlyMessageLimit("free")),
+                formatLimit(userSettings.getMonthlyTokenLimit("pro")),
+                formatLimit(userSettings.getMonthlyMessageLimit("pro"))
+        ).strip();
+    }
+
+    public String setUserBillingPlan(Long requesterId, Long targetUserId, String plan) {
+        if (!adminService.isOwner(requesterId)) {
+            return "Sorry, this command is only available to the bot owner.";
+        }
+        if (targetUserId == null) {
+            return "Usage: /plan set user id free|pro|owner";
+        }
+        if (userSettings.setBillingPlan(targetUserId, plan)) {
+            return "Plan for " + targetUserId + " set to: " + plan.toLowerCase(Locale.ROOT);
+        }
+        return "Unknown plan. Available: free, pro, owner";
     }
 
     // --- Private helpers ---
@@ -571,6 +642,14 @@ public class GptService {
             return normalized;
         }
         return normalized.substring(0, 117) + "...";
+    }
+
+    private String formatLimit(int limit) {
+        return limit < 0 ? "unlimited" : String.valueOf(limit);
+    }
+
+    private String formatRemaining(int remaining) {
+        return remaining < 0 ? "unlimited" : String.valueOf(remaining);
     }
 
     public boolean isOpenAiQuotaOrRateLimitIssue(String message) {

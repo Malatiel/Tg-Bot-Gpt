@@ -8,9 +8,11 @@ import org.springframework.transaction.annotation.Transactional;
 import tgbotgpt.model.entity.BotUser;
 import tgbotgpt.repository.BotUserRepository;
 
+import java.time.YearMonth;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -31,6 +33,21 @@ public class UserSettingsService {
 
     @Value("${bot.prompt.max.length:500}")
     private int promptMaxLength;
+
+    @Value("${billing.default.plan:free}")
+    private String defaultBillingPlan;
+
+    @Value("${billing.free.monthly.tokens:50000}")
+    private int freeMonthlyTokens;
+
+    @Value("${billing.free.monthly.messages:100}")
+    private int freeMonthlyMessages;
+
+    @Value("${billing.pro.monthly.tokens:1000000}")
+    private int proMonthlyTokens;
+
+    @Value("${billing.pro.monthly.messages:2000}")
+    private int proMonthlyMessages;
 
     private Set<String> allowedModels;
     private final BotUserRepository userRepository;
@@ -112,25 +129,91 @@ public class UserSettingsService {
     @Transactional
     public BotUser getOrCreateUser(Long userId, String username, String firstName) {
         return userRepository.findById(userId).map(user -> {
+            ensureBillingDefaults(user);
             if (username != null) user.setUsername(username);
             if (firstName != null) user.setFirstName(firstName);
             return userRepository.save(user);
-        }).orElseGet(() -> userRepository.save(new BotUser(userId, username, firstName)));
+        }).orElseGet(() -> {
+            BotUser user = new BotUser(userId, username, firstName);
+            user.setBillingPlan(normalizePlan(defaultBillingPlan));
+            user.setUsagePeriod(currentPeriod());
+            return userRepository.save(user);
+        });
     }
 
     @Transactional
     public void recordUsage(Long userId, int tokens) {
         BotUser user = getOrCreateUser(userId, null, null);
+        ensureCurrentBillingPeriod(user);
         user.addTokens(tokens);
+        user.addPeriodTokens(tokens);
         user.incrementMessages();
+        user.incrementPeriodMessages();
         userRepository.save(user);
     }
 
     @Transactional
     public void recordMessage(Long userId) {
         BotUser user = getOrCreateUser(userId, null, null);
+        ensureCurrentBillingPeriod(user);
         user.incrementMessages();
+        user.incrementPeriodMessages();
         userRepository.save(user);
+    }
+
+    @Transactional
+    public boolean setBillingPlan(Long userId, String plan) {
+        String normalized = plan == null ? "" : plan.trim().toLowerCase(Locale.ROOT);
+        if (!isKnownPlan(normalized)) {
+            return false;
+        }
+        BotUser user = getOrCreateUser(userId, null, null);
+        ensureCurrentBillingPeriod(user);
+        user.setBillingPlan(normalized);
+        userRepository.save(user);
+        return true;
+    }
+
+    @Transactional
+    public UsageStatus getUsageStatus(Long userId, boolean owner) {
+        BotUser user = getOrCreateUser(userId, null, null);
+        ensureCurrentBillingPeriod(user);
+        userRepository.save(user);
+        String plan = effectivePlan(user, owner);
+        return new UsageStatus(
+                plan,
+                user.getUsagePeriod(),
+                user.getTotalTokensUsed(),
+                user.getTotalMessages(),
+                user.getPeriodTokensUsed(),
+                user.getPeriodMessages(),
+                tokenLimit(plan),
+                messageLimit(plan)
+        );
+    }
+
+    @Transactional
+    public Optional<String> checkUsageLimit(Long userId, boolean owner) {
+        UsageStatus status = getUsageStatus(userId, owner);
+        if (status.unlimited()) {
+            return Optional.empty();
+        }
+        boolean tokensExceeded = status.tokenLimit() >= 0 && status.periodTokensUsed() >= status.tokenLimit();
+        boolean messagesExceeded = status.messageLimit() >= 0 && status.periodMessages() >= status.messageLimit();
+        if (!tokensExceeded && !messagesExceeded) {
+            return Optional.empty();
+        }
+        return Optional.of("""
+                Monthly limit reached for plan %s.
+                Used this month: %d/%s tokens, %d/%s messages.
+                Use /plan to see available plans.
+                """.formatted(
+                status.plan().toUpperCase(Locale.ROOT),
+                status.periodTokensUsed(),
+                formatLimit(status.tokenLimit()),
+                status.periodMessages(),
+                formatLimit(status.messageLimit())
+        ).strip());
     }
 
     public String getDefaultModel() {
@@ -184,5 +267,102 @@ public class UserSettingsService {
         return userRepository.findById(userId)
                 .map(BotUser::getTotalMessages)
                 .orElse(0);
+    }
+
+    public Set<String> getAvailableBillingPlans() {
+        return Set.of("free", "pro", "owner");
+    }
+
+    public int getMonthlyTokenLimit(String plan) {
+        return tokenLimit(plan);
+    }
+
+    public int getMonthlyMessageLimit(String plan) {
+        return messageLimit(plan);
+    }
+
+    private void ensureBillingDefaults(BotUser user) {
+        if (user.getBillingPlan() == null || user.getBillingPlan().isBlank()) {
+            user.setBillingPlan(normalizePlan(defaultBillingPlan));
+        } else {
+            user.setBillingPlan(normalizePlan(user.getBillingPlan()));
+        }
+        if (user.getUsagePeriod() == null || user.getUsagePeriod().isBlank()) {
+            user.setUsagePeriod(currentPeriod());
+        }
+    }
+
+    private void ensureCurrentBillingPeriod(BotUser user) {
+        ensureBillingDefaults(user);
+        String current = currentPeriod();
+        if (!current.equals(user.getUsagePeriod())) {
+            user.resetBillingPeriod(current);
+        }
+    }
+
+    private String effectivePlan(BotUser user, boolean owner) {
+        if (owner) {
+            return "owner";
+        }
+        return normalizePlan(user.getBillingPlan());
+    }
+
+    private String normalizePlan(String plan) {
+        String normalized = plan == null ? "" : plan.trim().toLowerCase(Locale.ROOT);
+        if (!isKnownPlan(normalized)) {
+            return "free";
+        }
+        return normalized;
+    }
+
+    private boolean isKnownPlan(String plan) {
+        return "free".equals(plan) || "pro".equals(plan) || "owner".equals(plan);
+    }
+
+    private int tokenLimit(String plan) {
+        return switch (normalizePlan(plan)) {
+            case "pro" -> proMonthlyTokens;
+            case "owner" -> -1;
+            default -> freeMonthlyTokens;
+        };
+    }
+
+    private int messageLimit(String plan) {
+        return switch (normalizePlan(plan)) {
+            case "pro" -> proMonthlyMessages;
+            case "owner" -> -1;
+            default -> freeMonthlyMessages;
+        };
+    }
+
+    private String currentPeriod() {
+        return YearMonth.now().toString();
+    }
+
+    private String formatLimit(int limit) {
+        return limit < 0 ? "unlimited" : String.valueOf(limit);
+    }
+
+    public record UsageStatus(
+            String plan,
+            String period,
+            int totalTokensUsed,
+            int totalMessages,
+            int periodTokensUsed,
+            int periodMessages,
+            int tokenLimit,
+            int messageLimit
+    ) {
+        public boolean unlimited() {
+            return tokenLimit < 0 && messageLimit < 0;
+        }
+
+        public int remainingTokens() {
+            return tokenLimit < 0 ? -1 : Math.max(0, tokenLimit - periodTokensUsed);
+        }
+
+        public int remainingMessages() {
+            return messageLimit < 0 ? -1 : Math.max(0, messageLimit - periodMessages);
+        }
     }
 }
