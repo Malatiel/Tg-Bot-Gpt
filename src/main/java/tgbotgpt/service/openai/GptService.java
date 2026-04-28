@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import tgbotgpt.clients.OpenAiClientException;
 import tgbotgpt.clients.OpenAIApiClient;
 import tgbotgpt.clients.OpenAIResponsesApiClient;
 import tgbotgpt.model.dto.Message;
@@ -51,6 +52,8 @@ public class GptService {
     private String defaultSystemPrompt;
     @Value("${openai.max.message.pool.size}")
     private Integer maxMessagePoolSize;
+    @Value("${openai.max.history.tokens:2000}")
+    private Integer maxHistoryTokens;
     @Value("${bot.presentation}")
     private String presentation;
     @Value("${openai.api.mode:responses}")
@@ -146,7 +149,17 @@ public class GptService {
     // --- Public API ---
 
     public String sendMessage(Update update) {
-        Optional<String> blocked = validateRequest(update);
+        return sendMessage(update, true);
+    }
+
+    public String sendMessageAfterStreamFailure(Update update) {
+        return sendMessage(update, false);
+    }
+
+    private String sendMessage(Update update, boolean consumeRateLimit) {
+        Optional<String> blocked = consumeRateLimit
+                ? validateRequest(update)
+                : validatePermissionAndEnsureUser(update);
         if (blocked.isPresent()) return blocked.get();
 
         Long userId = update.message().from().id();
@@ -169,7 +182,7 @@ public class GptService {
             return content;
         } catch (Exception e) {
             log.error("Error: ", e);
-            return "Sorry, something went wrong.";
+            return userFacingOpenAiError(e);
         }
     }
 
@@ -250,7 +263,11 @@ public class GptService {
                         return content != null ? content : "";
                     })
                     .filter(s -> !s.isEmpty())
-                    .doOnComplete(() -> persistExchange(userId, userText, fullResponse.toString(), streamTokens.get()))
+                    .doOnComplete(() -> {
+                        if (!fullResponse.isEmpty()) {
+                            persistExchange(userId, userText, fullResponse.toString(), streamTokens.get());
+                        }
+                    })
                     .doOnError(e -> log.error("Stream error: ", e));
         } catch (Exception e) {
             log.error("Error: ", e);
@@ -366,6 +383,29 @@ public class GptService {
         return String.join(", ", userSettings.getAllowedModels());
     }
 
+    public String getSettingsSummary(Long userId) {
+        return """
+                Settings
+                Model: %s
+                Available models: %s
+                Prompt: %s
+                Usage: %d tokens, %d messages
+                Rate limit: %d requests / %d seconds, %d remaining now
+                History: up to %d messages and about %d tokens
+                """.formatted(
+                getUserModel(userId),
+                getAvailableModels(),
+                summarizePrompt(userSettings.getSystemPrompt(userId)),
+                getUserTokens(userId),
+                getUserMessages(userId),
+                rateLimiter.getMaxRequests(),
+                rateLimiter.getWindowSeconds(),
+                rateLimiter.getRemainingRequests(userId),
+                maxMessagePoolSize,
+                maxHistoryTokens
+        ).strip();
+    }
+
     public String setUserPrompt(Long userId, String prompt) {
         return userSettings.setCustomPrompt(userId, prompt);
     }
@@ -410,7 +450,10 @@ public class GptService {
 
         if (UpdateUtils.isPrivate(update)) {
             // Load conversation history from DB
-            List<ChatMessage> history = chatHistory.getRecentMessages(userId, maxMessagePoolSize);
+            List<ChatMessage> history = trimHistoryByTokenBudget(
+                    chatHistory.getRecentMessages(userId, maxMessagePoolSize),
+                    maxHistoryTokens
+            );
             for (ChatMessage cm : history) {
                 Message msg = new Message();
                 msg.setRole(cm.getRole());
@@ -480,6 +523,86 @@ public class GptService {
                 model.startsWith("gpt-5.4") ||
                 model.startsWith("gpt-4o")
         );
+    }
+
+    private Optional<String> validatePermissionAndEnsureUser(Update update) {
+        if (!checkPermission(update)) {
+            return Optional.of("Sorry, you are not in the access list.");
+        }
+        ensureUser(update);
+        return Optional.empty();
+    }
+
+    private List<ChatMessage> trimHistoryByTokenBudget(List<ChatMessage> history, int tokenBudget) {
+        if (history == null || history.isEmpty() || tokenBudget <= 0) {
+            return Collections.emptyList();
+        }
+
+        List<ChatMessage> selected = new ArrayList<>();
+        int usedTokens = 0;
+        for (int i = history.size() - 1; i >= 0; i--) {
+            ChatMessage message = history.get(i);
+            int estimated = estimateTokens(message.getContent());
+            if (!selected.isEmpty() && usedTokens + estimated > tokenBudget) {
+                break;
+            }
+            if (selected.isEmpty() || usedTokens + estimated <= tokenBudget) {
+                selected.add(message);
+                usedTokens += estimated;
+            }
+        }
+        Collections.reverse(selected);
+        return selected;
+    }
+
+    private int estimateTokens(String text) {
+        if (text == null || text.isBlank()) {
+            return 1;
+        }
+        return Math.max(1, (int) Math.ceil(text.length() / 4.0));
+    }
+
+    private String summarizePrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return "default";
+        }
+        String normalized = prompt.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= 120) {
+            return normalized;
+        }
+        return normalized.substring(0, 117) + "...";
+    }
+
+    public boolean isOpenAiQuotaOrRateLimitIssue(String message) {
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("quota")
+                || normalized.contains("rate limit")
+                || normalized.contains("rate_limit")
+                || normalized.contains("insufficient_quota");
+    }
+
+    private String userFacingOpenAiError(Throwable error) {
+        if (isQuotaOrRateLimit(error)) {
+            return "OpenAI quota or rate limit reached. The bot owner has been notified.";
+        }
+        return "Sorry, something went wrong.";
+    }
+
+    private boolean isQuotaOrRateLimit(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof OpenAiClientException && isOpenAiQuotaOrRateLimitIssue(current.getMessage())) {
+                return true;
+            }
+            if (isOpenAiQuotaOrRateLimitIssue(current.getMessage())) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private boolean useResponsesApi() {

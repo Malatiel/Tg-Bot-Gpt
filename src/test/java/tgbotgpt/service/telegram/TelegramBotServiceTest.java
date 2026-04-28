@@ -2,11 +2,19 @@ package tgbotgpt.service.telegram;
 
 import com.pengrad.telegrambot.TelegramBot;
 import com.pengrad.telegrambot.UpdatesListener;
+import com.pengrad.telegrambot.model.Chat;
+import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.Update;
+import com.pengrad.telegrambot.model.User;
+import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
+import com.pengrad.telegrambot.request.EditMessageText;
 import com.pengrad.telegrambot.request.SendMessage;
+import com.pengrad.telegrambot.response.BaseResponse;
 import com.pengrad.telegrambot.response.SendResponse;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+import reactor.core.publisher.Flux;
 import tgbotgpt.service.BotAdminService;
 import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.DocumentService;
@@ -19,9 +27,11 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -177,12 +187,78 @@ class TelegramBotServiceTest {
         verify(bot, times(1)).execute(eq(request));
     }
 
+    @Test
+    void settingsCommandSendsSettingsSummary() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        when(gptService.getSettingsSummary(1L)).thenReturn("Settings\nModel: gpt-5.4-nano");
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/settings"));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot).execute(captor.capture());
+        assertEquals("Settings\nModel: gpt-5.4-nano", captor.getValue().getParameters().get("text"));
+    }
+
+    @Test
+    void modelCommandSendsInlineModelKeyboard() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        when(gptService.getUserModel(1L)).thenReturn("gpt-5.4-nano");
+        when(gptService.getAvailableModels()).thenReturn("gpt-5.4-nano, gpt-5.4-mini");
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/model"));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot).execute(captor.capture());
+        assertTrue(((String) captor.getValue().getParameters().get("text")).contains("Current model: gpt-5.4-nano"));
+        assertInstanceOf(InlineKeyboardMarkup.class, captor.getValue().getParameters().get("reply_markup"));
+    }
+
+    @Test
+    void streamingErrorFallsBackToNonStreamCompletion() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        Update update = textUpdate(1L, "Hello");
+        when(gptService.sendMessageStream(update)).thenReturn(Flux.error(new RuntimeException("stream failed")));
+        when(gptService.sendMessageAfterStreamFailure(update)).thenReturn("Fallback answer");
+        when(gptService.isOpenAiQuotaOrRateLimitIssue("Fallback answer")).thenReturn(false);
+        doReturn(sendResponseWithMessage(10)).when(bot).execute(any(SendMessage.class));
+        BaseResponse editResponse = mock(BaseResponse.class);
+        when(editResponse.isOk()).thenReturn(true);
+        doReturn(editResponse).when(bot).execute(any(EditMessageText.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+        ReflectionTestUtils.setField(service, "streamEnabled", true);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", update);
+
+        verify(gptService).sendMessageAfterStreamFailure(update);
+        verify(bot).execute(any(EditMessageText.class));
+    }
+
     private TelegramBotService newService(BotMetricsService metrics) {
+        return newService(mock(GptService.class), mock(BotAdminService.class), metrics);
+    }
+
+    private TelegramBotService newService(GptService gptService, BotAdminService adminService, BotMetricsService metrics) {
         return new TelegramBotService(
-                mock(GptService.class),
+                gptService,
                 mock(ImageService.class),
                 mock(DocumentService.class),
-                mock(BotAdminService.class),
+                adminService,
                 metrics
         );
     }
@@ -204,5 +280,33 @@ class TelegramBotServiceTest {
             when(response.parameters()).thenReturn(params);
         }
         return response;
+    }
+
+    private SendResponse sendResponseWithMessage(int messageId) {
+        SendResponse response = sendResponseWith(0, null);
+        Message message = mock(Message.class);
+        when(message.messageId()).thenReturn(messageId);
+        when(response.message()).thenReturn(message);
+        return response;
+    }
+
+    private Update textUpdate(Long userId, String text) {
+        Update update = mock(Update.class);
+        Message message = mock(Message.class);
+        User user = mock(User.class);
+        Chat chat = mock(Chat.class);
+
+        when(update.message()).thenReturn(message);
+        when(message.text()).thenReturn(text);
+        when(message.from()).thenReturn(user);
+        when(message.chat()).thenReturn(chat);
+        when(message.messageId()).thenReturn(42);
+        when(user.id()).thenReturn(userId);
+        when(user.firstName()).thenReturn("Test");
+        when(user.username()).thenReturn("test");
+        when(chat.id()).thenReturn(100L);
+        when(chat.type()).thenReturn(Chat.Type.Private);
+
+        return update;
     }
 }

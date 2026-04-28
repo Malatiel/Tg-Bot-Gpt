@@ -9,14 +9,14 @@
 
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%date %-5level %logger{0} [%file:%line] %msg%n</pattern>
+            <pattern>%date %-5level request_id=%X{request_id:-none} user=%X{user_hash:-none} operation=%X{operation:-none} %logger{0} [%file:%line] %msg%n</pattern>
         </encoder>
     </appender>
 
     <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%date %-5level %logger{0} [%file:%line] %msg%n</pattern>
+            <pattern>%date %-5level request_id=%X{request_id:-none} user=%X{user_hash:-none} operation=%X{operation:-none} %logger{0} [%file:%line] %msg%n</pattern>
         </encoder>
     </appender>
 

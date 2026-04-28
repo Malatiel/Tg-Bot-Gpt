@@ -3,8 +3,11 @@ package tgbotgpt.service.telegram;
 import com.pengrad.telegrambot.TelegramBot;
 import com.pengrad.telegrambot.UpdatesListener;
 import com.pengrad.telegrambot.model.*;
+import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
+import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
 import com.pengrad.telegrambot.model.request.ParseMode;
 import com.pengrad.telegrambot.model.request.ReplyKeyboardRemove;
+import com.pengrad.telegrambot.request.AnswerCallbackQuery;
 import com.pengrad.telegrambot.request.BaseRequest;
 import com.pengrad.telegrambot.request.EditMessageText;
 import com.pengrad.telegrambot.request.GetFile;
@@ -17,6 +20,7 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import tgbotgpt.service.BotAdminService;
 import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.DocumentExtractionResult;
@@ -24,10 +28,15 @@ import tgbotgpt.service.DocumentService;
 import tgbotgpt.service.ImageService;
 import tgbotgpt.service.ImageDownloadResult;
 import tgbotgpt.service.openai.GptService;
+import tgbotgpt.utils.LogUtils;
 import tgbotgpt.utils.TelegramUtils;
 import tgbotgpt.utils.UpdateUtils;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -36,6 +45,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.MDC;
 
 @Slf4j
 @Service
@@ -135,6 +145,29 @@ public class TelegramBotService {
     }
 
     private void processUpdate(Update update) {
+        String operation = operationName(update);
+        Instant startedAt = Instant.now();
+        boolean success = false;
+        MDC.put("request_id", UUID.randomUUID().toString());
+        MDC.put("operation", operation);
+        MDC.put("user_hash", LogUtils.hashUserId(userId(update)));
+        try {
+            processUpdateInternal(update);
+            success = true;
+        } finally {
+            Duration duration = Duration.between(startedAt, Instant.now());
+            metrics.recordOperationDuration(operation, success, duration);
+            log.info("operation={} result={} duration_ms={}", operation, success ? "success" : "failure", duration.toMillis());
+            MDC.clear();
+        }
+    }
+
+    private void processUpdateInternal(Update update) {
+        if (update.callbackQuery() != null) {
+            processCallback(update.callbackQuery());
+            return;
+        }
+
         if (update.message() == null) return;
 
         // Handle documents
@@ -235,6 +268,7 @@ public class TelegramBotService {
             processTextStream(update);
         } else {
             String response = gptService.sendMessage(update);
+            notifyOwnersOnOpenAiQuotaIssue(response);
             log.info("{} generated a response", botName);
             sendLongReply(update, response);
         }
@@ -287,9 +321,16 @@ public class TelegramBotService {
                     }
                     log.info("{} generated a streaming response", botName);
                 })
-                .doOnError(e -> {
+                .onErrorResume(e -> {
                     log.error("Stream error: ", e);
-                    editMessage(chatId, messageId, "Sorry, something went wrong.");
+                    String fallback = gptService.sendMessageAfterStreamFailure(update);
+                    notifyOwnersOnOpenAiQuotaIssue(fallback);
+                    List<String> parts = TelegramUtils.splitMessage(fallback);
+                    editMessage(chatId, messageId, parts.get(0));
+                    for (int i = 1; i < parts.size(); i++) {
+                        sendReply(update, parts.get(i));
+                    }
+                    return Flux.empty();
                 })
                 .blockLast();
     }
@@ -410,6 +451,10 @@ public class TelegramBotService {
             handleStatusCommand(update);
             return;
         }
+        if (text.startsWith("/settings")) {
+            handleSettingsCommand(update);
+            return;
+        }
 
         switch (text) {
             case "/start":
@@ -432,15 +477,48 @@ public class TelegramBotService {
 
         if (text.equalsIgnoreCase("/model")) {
             String current = gptService.getUserModel(userId);
-            sendReply(update, "Current model: " + current
-                    + "\nAvailable: " + gptService.getAvailableModels()
-                    + "\nUsage: /model <name>");
+            sendModelMenu(update, "Current model: " + current);
             return;
         }
 
         String modelName = text.substring("/model".length()).trim();
         String result = gptService.setUserModel(userId, modelName);
         sendReply(update, result);
+    }
+
+    private void sendModelMenu(Update update, String header) {
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        for (String model : gptService.getAvailableModels().split(",")) {
+            String trimmed = model.trim();
+            if (!trimmed.isEmpty()) {
+                keyboard.addRow(new InlineKeyboardButton(trimmed).callbackData("model:" + trimmed));
+            }
+        }
+        SendMessage request = new SendMessage(update.message().chat().id(), header + "\nChoose a model:")
+                .disableWebPagePreview(true)
+                .disableNotification(true)
+                .replyMarkup(keyboard);
+        SendResponse response = executeWithRetry(request, "send");
+        metrics.recordTelegramSend(false, response.isOk());
+        if (!response.isOk()) {
+            log.error("Failed to send model menu: {}", response.description());
+        }
+    }
+
+    private void processCallback(CallbackQuery callback) {
+        String data = callback.data();
+        if (data == null || !data.startsWith("model:")) {
+            bot.execute(new AnswerCallbackQuery(callback.id()).text("Unsupported action"));
+            return;
+        }
+
+        String model = data.substring("model:".length()).trim();
+        String result = gptService.setUserModel(callback.from().id(), model);
+        bot.execute(new AnswerCallbackQuery(callback.id()).text(result));
+        if (callback.message() != null) {
+            editMessage(callback.message().chat().id(), callback.message().messageId(),
+                    result + "\n\n" + gptService.getSettingsSummary(callback.from().id()));
+        }
     }
 
     private void handlePromptCommand(Update update) {
@@ -469,6 +547,11 @@ public class TelegramBotService {
         sendReply(update, adminService.statusFor(userId));
     }
 
+    private void handleSettingsCommand(Update update) {
+        Long userId = update.message().from().id();
+        sendReply(update, gptService.getSettingsSummary(userId));
+    }
+
     private void presentation(Update update) {
         String response = gptService.sendCustomMessage(update, presentationText);
         sendReply(update, response);
@@ -480,6 +563,64 @@ public class TelegramBotService {
         int messages = gptService.getUserMessages(userId);
         String message = String.format("Your usage:\nTokens: %d\nMessages: %d", tokens, messages);
         sendReply(update, message);
+    }
+
+    private void notifyOwnersOnOpenAiQuotaIssue(String response) {
+        if (gptService.isOpenAiQuotaOrRateLimitIssue(response)) {
+            notifyOwners("OpenAI quota/rate-limit issue detected. Check billing, project limits, and /status.");
+        }
+    }
+
+    private void notifyOwners(String text) {
+        Set<Long> ownerIds = adminService.getOwnerIds();
+        if (ownerIds == null || ownerIds.isEmpty()) {
+            return;
+        }
+        for (Long ownerId : ownerIds) {
+            SendResponse response = executeWithRetry(new SendMessage(ownerId, text).disableNotification(false), "send");
+            metrics.recordTelegramSend(false, response.isOk());
+            if (!response.isOk()) {
+                log.warn("Failed to notify owner {}: {}", LogUtils.hashUserId(ownerId), response.description());
+            }
+        }
+    }
+
+    private Long userId(Update update) {
+        if (update == null) {
+            return null;
+        }
+        if (update.message() != null && update.message().from() != null) {
+            return update.message().from().id();
+        }
+        if (update.callbackQuery() != null && update.callbackQuery().from() != null) {
+            return update.callbackQuery().from().id();
+        }
+        return null;
+    }
+
+    private String operationName(Update update) {
+        if (update == null) {
+            return "unknown";
+        }
+        if (update.callbackQuery() != null) {
+            return "callback";
+        }
+        if (update.message() == null) {
+            return "empty";
+        }
+        if (update.message().document() != null) {
+            return "document";
+        }
+        if (update.message().photo() != null && update.message().photo().length > 0) {
+            return "photo";
+        }
+        if (update.message().text() != null && update.message().text().startsWith("/")) {
+            return "command";
+        }
+        if (update.message().text() != null) {
+            return "text";
+        }
+        return "unknown";
     }
 
     private void resetUserContext(Update update) {

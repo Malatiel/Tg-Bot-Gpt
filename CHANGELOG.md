@@ -3,6 +3,38 @@
 All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-04-28 — Bot UX and operations
+
+### Added
+- `/model` now opens inline buttons for model selection instead of requiring
+  manual model-name entry.
+- New `/settings` command showing current model, available models, prompt
+  summary, usage, rate limit state, and history limits.
+- Approximate history token budget via `OPENAI_MAX_HISTORY_TOKENS` /
+  `openai.max.history.tokens`, in addition to the existing message-count
+  limit.
+- Streaming fallback: if an OpenAI stream fails, the bot retries once with a
+  non-stream completion without consuming another local rate-limit slot.
+- Owner alerts for OpenAI quota and rate-limit errors.
+- Structured update logs with request id, hashed Telegram user id, operation,
+  result, and duration.
+- Docker app healthcheck against `/actuator/health`.
+- PostgreSQL backup and restore scripts for Docker Compose deployments.
+- `.env.prod.example` with production-oriented placeholders.
+
+### Changed
+- `/model` still accepts `/model <name>` for direct selection, but the default
+  UX is now button-based.
+- OpenAI quota/rate-limit failures now return an owner-notification message
+  instead of the generic error text.
+
+### Fixed
+- Streaming fallback errors are now swallowed after the fallback response is
+  sent, so a failed stream no longer bubbles up after the user receives the
+  non-stream answer.
+- Empty successful streams are no longer persisted as blank assistant messages
+  in chat history.
+
 ## [0.2.0] — 2026-04-27 — Production hardening
 
 ### Added

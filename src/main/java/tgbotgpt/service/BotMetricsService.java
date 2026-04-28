@@ -1,7 +1,10 @@
 package tgbotgpt.service;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
+
+import java.time.Duration;
 
 @Service
 public class BotMetricsService {
@@ -48,6 +51,14 @@ public class BotMetricsService {
         meterRegistry.counter("tgbotgpt.telegram.retry",
                 "operation", normalize(operation)
         ).increment();
+    }
+
+    public void recordOperationDuration(String operation, boolean success, Duration duration) {
+        Timer.builder("tgbotgpt.operation.duration")
+                .tag("operation", normalize(operation))
+                .tag("result", success ? "success" : "failure")
+                .register(meterRegistry)
+                .record(duration);
     }
 
     private String errorType(Throwable error) {

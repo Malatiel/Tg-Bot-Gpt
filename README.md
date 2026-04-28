@@ -10,7 +10,8 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **Image analysis** — send a photo and a vision-capable GPT model will describe/analyze it
 - **Document analysis** — send a PDF or TXT file for GPT to analyze (with optional caption as instruction)
 - **Streaming responses** — bot edits its message in real-time as tokens arrive
-- **Per-user model selection** — each user can switch GPT models via `/model`
+- **Per-user model selection** — each user can switch GPT models via `/model` buttons
+- **Settings overview** — `/settings` shows model, prompt summary, usage, and limits
 - **Rate limiting** — configurable per-user request limit (sliding window)
 - **Message encryption** — AES-256-GCM encryption for chat messages in DB (optional)
 - **Auto-cleanup** — old messages purged from DB after 30 days
@@ -28,7 +29,8 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 | `/usage`           | Show your personal token/message stats   |
 | `/reset`           | Reset conversation context + history     |
 | `/status`          | Show service status (owner only)         |
-| `/model`           | Show current model                       |
+| `/settings`        | Show model, prompt, usage, and limits    |
+| `/model`           | Show model picker buttons                |
 | `/model <name>`    | Switch to a different GPT model          |
 | `/prompt <text>`   | Set a custom system prompt               |
 | `/prompt reset`    | Reset prompt to default                  |
@@ -72,6 +74,7 @@ OPENAI_APIKEY=your-openai-api-key
 OPENAI_API_MODE=responses
 OPENAI_MODEL=gpt-5.4-nano
 OPENAI_ALLOWED_MODELS=gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o
+OPENAI_MAX_HISTORY_TOKENS=2000
 SPRING_PROFILES_ACTIVE=dev
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your-postgres-password
@@ -99,6 +102,7 @@ export OPENAI_APIKEY=your-openai-api-key
 export OPENAI_API_MODE=responses
 export OPENAI_MODEL=gpt-5.4-nano
 export OPENAI_ALLOWED_MODELS=gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o
+export OPENAI_MAX_HISTORY_TOKENS=2000
 export SPRING_PROFILES_ACTIVE=dev
 export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/tgbotgpt
 export SPRING_DATASOURCE_USERNAME=postgres
@@ -148,6 +152,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `openai.temperature`           | Response creativity (0.0 - 1.0)      | `0.7`                 |
 | `openai.maxtokens`             | Max tokens per response              | `3000`                |
 | `openai.max.message.pool.size` | Recent messages loaded from DB as context | `7`                   |
+| `openai.max.history.tokens`    | Approximate token budget for DB history loaded as context | `${OPENAI_MAX_HISTORY_TOKENS:2000}` |
 | `openai.allowed.models`        | Comma-separated models users can choose via `/model <name>` | `${OPENAI_ALLOWED_MODELS:gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o}` |
 | `bot.whitelist`                | Allowed user IDs/usernames (empty = all) | empty             |
 | `bot.rate.limit`               | Max requests per user per window     | `10`                  |
@@ -190,6 +195,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - Automatic cleanup of old chat history (30-day retention)
 - Whitelist support for restricting bot access
 - Owner-only `/status` command reports runtime health (aggregate, DB, OpenAI) without tokens, keys, or user content
+- Owners are notified when OpenAI quota or rate-limit errors are detected
 - Actuator binds to `127.0.0.1:8081` by default; the `prod` profile exposes only `/actuator/health`
 - Streaming OpenAI responses include usage accounting so `/usage` tracks token totals for streaming users
 
@@ -199,7 +205,20 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - **Graceful shutdown.** On SIGTERM the updates listener is removed first, the executor is given `bot.shutdown.timeout.seconds` to drain, then `shutdownNow()` is called. In-flight OpenAI calls have a chance to finish on every deploy.
 - **Telegram 429 handling.** `sendMessage` and `editMessage` honour `retry_after` once. If the server asks for a wait longer than `bot.telegram.retry.max.backoff.ms`, the retry is skipped instead of blocking an executor thread on a guaranteed-to-fail repeat.
 - **OpenAI health indicator.** A custom `openai` health component reports `UP`, `DEGRADED` (recent failure within the freshness window), or `UNKNOWN`. Surfaced via `/actuator/health` (when exposure permits) and the owner-only `/status`.
+- **Streaming fallback.** If an OpenAI streaming response fails, the bot retries once with a non-stream completion without consuming another local rate-limit slot.
+- **Structured logs.** Console logs include `request_id`, hashed Telegram user id, operation name, result, and duration for update handling.
 - **Container-friendly defaults.** `prod` logs to stdout only; the Dockerfile sets `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError`.
+
+## Backup and restore
+
+For Docker Compose deployments:
+
+```bash
+./scripts/backup-postgres.sh
+./scripts/restore-postgres.sh backups/tgbotgpt-2026-04-28.dump
+```
+
+Backups are logical PostgreSQL dumps. If message encryption is enabled, keep the matching `ENCRYPTION_KEY` backed up separately from the dump.
 
 See [DEPLOY.md](DEPLOY.md) for production runbook and [CHANGELOG.md](CHANGELOG.md) for the release log.
 

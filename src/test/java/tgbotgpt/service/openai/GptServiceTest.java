@@ -12,6 +12,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import tgbotgpt.clients.OpenAiClientException;
 import tgbotgpt.clients.OpenAIApiClient;
 import tgbotgpt.clients.OpenAIResponsesApiClient;
 import tgbotgpt.model.dto.Choice;
@@ -65,6 +66,7 @@ class GptServiceTest {
         ReflectionTestUtils.setField(gptService, "temperature", 0.7);
         ReflectionTestUtils.setField(gptService, "defaultSystemPrompt", "You are a helpful assistant.");
         ReflectionTestUtils.setField(gptService, "maxMessagePoolSize", 7);
+        ReflectionTestUtils.setField(gptService, "maxHistoryTokens", 2000);
         ReflectionTestUtils.setField(gptService, "presentation", "Hello");
         ReflectionTestUtils.setField(gptService, "apiMode", "chat");
         ReflectionTestUtils.setField(gptService, "whiteList", null);
@@ -482,6 +484,88 @@ class GptServiceTest {
                     && "user".equals(msgs.get(3).getRole())
                     && "New message".equals(msgs.get(3).getContentAsString());
         }));
+    }
+
+    @Test
+    void shouldTrimHistoryByApproximateTokenBudget() {
+        ReflectionTestUtils.setField(gptService, "maxHistoryTokens", 5);
+        Update update = createPrivateUpdate(1L, "New message");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("New message")).thenReturn(false);
+
+        tgbotgpt.model.entity.ChatMessage old = new tgbotgpt.model.entity.ChatMessage(1L, "user", "old short", null);
+        tgbotgpt.model.entity.ChatMessage tooLarge = new tgbotgpt.model.entity.ChatMessage(1L, "assistant",
+                "This previous answer is intentionally long enough to exceed the small test budget.", null);
+        tgbotgpt.model.entity.ChatMessage recent = new tgbotgpt.model.entity.ChatMessage(1L, "user", "ok", null);
+        when(chatHistory.getRecentMessages(1L, 7)).thenReturn(List.of(old, tooLarge, recent));
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("Reply")));
+
+        gptService.sendMessage(update);
+
+        verify(client).getCompletion(argThat(req -> {
+            List<String> contents = req.getMessages().stream()
+                    .map(Message::getContentAsString)
+                    .toList();
+            return contents.contains("ok")
+                    && contents.contains("New message")
+                    && !contents.contains("old short")
+                    && contents.stream().noneMatch(content -> content != null && content.contains("intentionally long"));
+        }));
+    }
+
+    @Test
+    void shouldBuildSettingsSummary() {
+        when(userSettings.getModel(1L)).thenReturn("gpt-5.4-nano");
+        when(userSettings.getAllowedModels()).thenReturn(java.util.Set.of("gpt-5.4-nano", "gpt-5.4-mini"));
+        when(userSettings.getSystemPrompt(1L)).thenReturn("Helpful prompt");
+        when(userSettings.getUserTokens(1L)).thenReturn(123);
+        when(userSettings.getUserMessages(1L)).thenReturn(4);
+        when(rateLimiter.getMaxRequests()).thenReturn(10);
+        when(rateLimiter.getWindowSeconds()).thenReturn(60);
+        when(rateLimiter.getRemainingRequests(1L)).thenReturn(7);
+
+        String summary = gptService.getSettingsSummary(1L);
+
+        assertTrue(summary.contains("Model: gpt-5.4-nano"));
+        assertTrue(summary.contains("Prompt: Helpful prompt"));
+        assertTrue(summary.contains("Usage: 123 tokens, 4 messages"));
+        assertTrue(summary.contains("Rate limit: 10 requests / 60 seconds, 7 remaining now"));
+        assertTrue(summary.contains("about 2000 tokens"));
+    }
+
+    @Test
+    void shouldReturnOwnerAlertMessageOnOpenAiQuotaError() {
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("Hello")).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class)))
+                .thenReturn(Mono.error(new OpenAiClientException("insufficient_quota", false)));
+
+        String result = gptService.sendMessage(update);
+
+        assertTrue(result.contains("quota or rate limit"));
+        assertTrue(gptService.isOpenAiQuotaOrRateLimitIssue(result));
+    }
+
+    @Test
+    void shouldFallbackAfterStreamFailureWithoutConsumingRateLimitAgain() {
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("Hello")).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("Fallback")));
+
+        String result = gptService.sendMessageAfterStreamFailure(update);
+
+        assertEquals("Fallback", result);
+        verify(rateLimiter, never()).isAllowed(anyLong());
     }
 
     @Test

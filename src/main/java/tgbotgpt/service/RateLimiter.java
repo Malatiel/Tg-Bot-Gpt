@@ -47,6 +47,14 @@ public class RateLimiter {
         }
     }
 
+    public int getMaxRequests() {
+        return maxRequests;
+    }
+
+    public int getWindowSeconds() {
+        return windowSeconds;
+    }
+
     public long getSecondsUntilReset(Long userId) {
         Deque<Long> timestamps = requestTimestamps.get(userId);
         if (timestamps == null || timestamps.isEmpty()) {

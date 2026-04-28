@@ -34,6 +34,10 @@ public class BotAdminService {
         return userId != null && owners.contains(userId);
     }
 
+    public Set<Long> getOwnerIds() {
+        return owners;
+    }
+
     public String statusFor(Long userId) {
         if (!isOwner(userId)) {
             return "Sorry, this command is only available to the bot owner.";

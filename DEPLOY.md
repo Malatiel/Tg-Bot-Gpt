@@ -18,7 +18,8 @@ development see [README.md](README.md).
 | `BOT_OWNER_IDS`              | recommended        | Comma-separated Telegram user IDs allowed to run `/status`           |
 | `OPENAI_API_MODE`            | optional           | `responses` (default) or `chat`                                      |
 | `OPENAI_MODEL`               | optional           | Default model; `gpt-5.4-nano` by default for lowest GPT-5.4 cost     |
-| `OPENAI_ALLOWED_MODELS`      | optional           | Comma-separated models users can choose with `/model <name>`         |
+| `OPENAI_ALLOWED_MODELS`      | optional           | Comma-separated models users can choose with `/model` buttons        |
+| `OPENAI_MAX_HISTORY_TOKENS`  | optional           | Approximate context budget for DB history, default `2000`            |
 | `BOT_WHITELIST`              | optional           | Comma-separated user IDs/usernames/group names; empty = open access  |
 
 ## Profiles
@@ -97,6 +98,9 @@ The bot exposes a built-in `OpenAiHealthIndicator`:
 The owner-only `/status` Telegram command surfaces aggregate, DB and OpenAI
 status without exposing secrets.
 
+OpenAI quota and rate-limit failures also trigger a Telegram alert to
+`BOT_OWNER_IDS`.
+
 ## Graceful shutdown
 
 On SIGTERM:
@@ -154,7 +158,14 @@ docker run -e JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=50" ...
 Schema-only backup is meaningless without `ENCRYPTION_KEY` — chat history is
 AES-256-GCM-encrypted at the application layer.
 
-Daily logical backup:
+For Docker Compose deployments, use the included scripts:
+
+```bash
+./scripts/backup-postgres.sh
+./scripts/restore-postgres.sh backups/tgbotgpt-2026-04-28.dump
+```
+
+Manual daily logical backup:
 
 ```bash
 pg_dump -Fc -U postgres -h db tgbotgpt > tgbotgpt-$(date +%F).dump
