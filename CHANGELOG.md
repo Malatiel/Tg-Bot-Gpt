@@ -5,6 +5,8 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-30 — Plan UX and release reliability
+
 ### Added
 - Billing-ready usage plans: `free`, `pro`, and `owner`.
 - Monthly token/message counters and limits with automatic period reset.
