@@ -462,15 +462,15 @@ public class GptService {
     public String getPlanSummary(Long userId) {
         UserSettingsService.UsageStatus status = userSettings.getUsageStatus(userId, adminService.isOwner(userId));
         return """
-                Your plan: %s
+                Current plan: %s
 
                 Available plans:
                 FREE - %s tokens/month, %s messages/month
                 PRO - %s tokens/month, %s messages/month
                 OWNER - unlimited
 
-                Owners can assign a plan with:
-                /plan set user id free|pro|owner
+                Use /balance to check remaining limits.
+                Use /upgrade to request Pro.
                 """.formatted(
                 status.plan().toUpperCase(Locale.ROOT),
                 formatLimit(userSettings.getMonthlyTokenLimit("free")),
@@ -485,7 +485,7 @@ public class GptService {
             return "Sorry, this command is only available to the bot owner.";
         }
         if (targetUserId == null) {
-            return "Usage: /plan set user id free|pro|owner";
+            return "Usage: /admin plan <telegram_id> <free|pro|owner>";
         }
         if (userSettings.setBillingPlan(targetUserId, plan)) {
             return "Plan for " + targetUserId + " set to: " + plan.toLowerCase(Locale.ROOT);
@@ -493,7 +493,81 @@ public class GptService {
         return "Unknown plan. Available: free, pro, owner";
     }
 
+    public UpgradeRequest createUpgradeRequest(Long userId) {
+        UserSettingsService.UsageStatus status = userSettings.getUsageStatus(userId, adminService.isOwner(userId));
+        if ("pro".equals(status.plan()) || "owner".equals(status.plan())) {
+            return new UpgradeRequest(
+                    "You already have " + status.plan().toUpperCase(Locale.ROOT) + ".",
+                    null,
+                    false
+            );
+        }
+
+        String userMessage = """
+                Upgrade request sent.
+                Your Telegram id: %d
+                Current plan: %s
+                """.formatted(userId, status.plan().toUpperCase(Locale.ROOT)).strip();
+        String ownerMessage = """
+                Upgrade request from Telegram user %d.
+                Current plan: %s
+                Review: /admin usage %d
+                Approve Pro: /admin plan %d pro
+                """.formatted(userId, status.plan().toUpperCase(Locale.ROOT), userId, userId).strip();
+        return new UpgradeRequest(userMessage, ownerMessage, true);
+    }
+
+    public String getAdminHelp(Long requesterId) {
+        if (!adminService.isOwner(requesterId)) {
+            return "Sorry, this command is only available to the bot owner.";
+        }
+        return """
+                Admin commands
+                /admin status
+                /admin users
+                /admin usage <telegram_id>
+                /admin plan <telegram_id> <free|pro|owner>
+                """.strip();
+    }
+
+    public String getAdminUsersSummary(Long requesterId) {
+        if (!adminService.isOwner(requesterId)) {
+            return "Sorry, this command is only available to the bot owner.";
+        }
+        List<UserSettingsService.AdminUserSummary> users = userSettings.getRecentUsers(10);
+        if (users.isEmpty()) {
+            return "No users yet.";
+        }
+        return users.stream()
+                .map(user -> "%d%s - %s, %s, %d tokens, %d messages".formatted(
+                        user.telegramId(),
+                        formatUsername(user.username()),
+                        user.plan().toUpperCase(Locale.ROOT),
+                        user.period(),
+                        user.periodTokensUsed(),
+                        user.periodMessages()
+                ))
+                .collect(Collectors.joining("\n", "Recent users\n", ""));
+    }
+
+    public String getAdminUserUsage(Long requesterId, Long targetUserId) {
+        if (!adminService.isOwner(requesterId)) {
+            return "Sorry, this command is only available to the bot owner.";
+        }
+        if (targetUserId == null) {
+            return "Usage: /admin usage <telegram_id>";
+        }
+        return getBalanceSummary(targetUserId);
+    }
+
     // --- Private helpers ---
+
+    private String formatUsername(String username) {
+        if (username == null || username.isBlank()) {
+            return "";
+        }
+        return " @" + username;
+    }
 
     private void ensureUser(Update update) {
         Long userId = update.message().from().id();
@@ -725,5 +799,8 @@ public class GptService {
 
         log.warn("Unauthorized user id={}", userId);
         return false;
+    }
+
+    public record UpgradeRequest(String userMessage, String ownerMessage, boolean notifyOwners) {
     }
 }

@@ -22,6 +22,7 @@ import tgbotgpt.service.ImageService;
 import tgbotgpt.service.openai.GptService;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -244,7 +245,26 @@ class TelegramBotServiceTest {
     }
 
     @Test
-    void planSetCommandDelegatesToGptService() {
+    void planCommandSendsInlinePlanKeyboard() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        when(gptService.getPlanSummary(1L)).thenReturn("Current plan: FREE");
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/plan"));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot).execute(captor.capture());
+        assertEquals("Current plan: FREE", captor.getValue().getParameters().get("text"));
+        assertInstanceOf(InlineKeyboardMarkup.class, captor.getValue().getParameters().get("reply_markup"));
+    }
+
+    @Test
+    void adminPlanCommandDelegatesToGptService() {
         TelegramBot bot = mock(TelegramBot.class);
         GptService gptService = mock(GptService.class);
         BotMetricsService metrics = mock(BotMetricsService.class);
@@ -254,9 +274,36 @@ class TelegramBotServiceTest {
         TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
         ReflectionTestUtils.setField(service, "bot", bot);
 
-        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/plan set 2 pro"));
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/admin plan 2 pro"));
 
         verify(gptService).setUserBillingPlan(1L, 2L, "pro");
+    }
+
+    @Test
+    void upgradeCommandRepliesAndNotifiesOwners() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotAdminService adminService = mock(BotAdminService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        when(gptService.createUpgradeRequest(1L)).thenReturn(new GptService.UpgradeRequest(
+                "Upgrade request sent.",
+                "Approve Pro: /admin plan 1 pro",
+                true
+        ));
+        when(adminService.getOwnerIds()).thenReturn(Set.of(99L));
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, adminService, metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/upgrade"));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot, times(2)).execute(captor.capture());
+        assertTrue(captor.getAllValues().stream()
+                .anyMatch(request -> "Upgrade request sent.".equals(request.getParameters().get("text"))));
+        assertTrue(captor.getAllValues().stream()
+                .anyMatch(request -> "Approve Pro: /admin plan 1 pro".equals(request.getParameters().get("text"))));
     }
 
     @Test

@@ -10,6 +10,7 @@ import tgbotgpt.repository.BotUserRepository;
 
 import java.time.YearMonth;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -206,7 +207,7 @@ public class UserSettingsService {
         return Optional.of("""
                 Monthly limit reached for plan %s.
                 Used this month: %d/%s tokens, %d/%s messages.
-                Use /plan to see available plans.
+                Use /plan to see available plans or /upgrade to request Pro.
                 """.formatted(
                 status.plan().toUpperCase(Locale.ROOT),
                 status.periodTokensUsed(),
@@ -279,6 +280,28 @@ public class UserSettingsService {
 
     public int getMonthlyMessageLimit(String plan) {
         return messageLimit(plan);
+    }
+
+    public List<AdminUserSummary> getRecentUsers(int limit) {
+        int actualLimit = Math.max(1, limit);
+        Comparator<BotUser> byLastActive = Comparator.comparing(
+                BotUser::getLastActive,
+                Comparator.nullsLast(Comparator.naturalOrder())
+        );
+        return userRepository.findAll().stream()
+                .sorted(byLastActive.reversed())
+                .limit(actualLimit)
+                .map(user -> new AdminUserSummary(
+                        user.getTelegramId(),
+                        user.getUsername(),
+                        normalizePlan(user.getBillingPlan()),
+                        user.getUsagePeriod(),
+                        user.getPeriodTokensUsed(),
+                        user.getPeriodMessages(),
+                        user.getTotalTokensUsed(),
+                        user.getTotalMessages()
+                ))
+                .toList();
     }
 
     private void ensureBillingDefaults(BotUser user) {
@@ -364,5 +387,17 @@ public class UserSettingsService {
         public int remainingMessages() {
             return messageLimit < 0 ? -1 : Math.max(0, messageLimit - periodMessages);
         }
+    }
+
+    public record AdminUserSummary(
+            Long telegramId,
+            String username,
+            String plan,
+            String period,
+            int periodTokensUsed,
+            int periodMessages,
+            int totalTokensUsed,
+            int totalMessages
+    ) {
     }
 }

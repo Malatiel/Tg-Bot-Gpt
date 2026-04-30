@@ -573,6 +573,7 @@ class GptServiceTest {
         assertTrue(balance.contains("Tokens this month: 300/1000000"));
         assertTrue(plan.contains("FREE - 50000 tokens/month"));
         assertTrue(plan.contains("PRO - 1000000 tokens/month"));
+        assertTrue(plan.contains("/upgrade"));
     }
 
     @Test
@@ -583,6 +584,32 @@ class GptServiceTest {
         String result = gptService.setUserBillingPlan(99L, 1L, "pro");
 
         assertEquals("Plan for 1 set to: pro", result);
+    }
+
+    @Test
+    void shouldCreateUpgradeRequestForFreeUser() {
+        when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
+                "free", "2026-04", 0, 0, 0, 0, 50000, 100
+        ));
+
+        GptService.UpgradeRequest request = gptService.createUpgradeRequest(1L);
+
+        assertTrue(request.notifyOwners());
+        assertTrue(request.userMessage().contains("Upgrade request sent."));
+        assertTrue(request.ownerMessage().contains("/admin plan 1 pro"));
+    }
+
+    @Test
+    void shouldBuildAdminUsersSummaryForOwner() {
+        when(adminService.isOwner(99L)).thenReturn(true);
+        when(userSettings.getRecentUsers(10)).thenReturn(List.of(new UserSettingsService.AdminUserSummary(
+                1L, "alice", "pro", "2026-04", 100, 2, 1000, 20
+        )));
+
+        String result = gptService.getAdminUsersSummary(99L);
+
+        assertTrue(result.contains("Recent users"));
+        assertTrue(result.contains("1 @alice - PRO"));
     }
 
     @Test

@@ -57,6 +57,16 @@ SPRING_FLYWAY_BASELINE_ON_MIGRATE=true SPRING_PROFILES_ACTIVE=prod ./run
 After the first run a baseline row is recorded; you can drop the env var
 afterwards.
 
+CI runs every Flyway migration against a fresh PostgreSQL database. Tagged
+releases are blocked if the clean migration check, Maven verification, or
+Docker image build fails.
+
+## Releases
+
+Release tags must have a matching `CHANGELOG.md` section, for example
+`## [0.4.0]`. The GitHub Release notes are generated from that section, and
+the full `CHANGELOG.md` is uploaded as a release asset alongside the jar.
+
 ## Encryption
 
 Generate a 256-bit AES key:
@@ -167,7 +177,8 @@ assign plans from Telegram:
 ```text
 /balance
 /plan
-/plan set <telegram_id> <free|pro|owner>
+/upgrade
+/admin plan <telegram_id> <free|pro|owner>
 ```
 
 Limits reset automatically when the `YYYY-MM` usage period changes.

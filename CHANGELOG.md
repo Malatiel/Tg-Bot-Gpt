@@ -9,13 +9,21 @@ All notable changes are documented here. The format follows
 - Billing-ready usage plans: `free`, `pro`, and `owner`.
 - Monthly token/message counters and limits with automatic period reset.
 - `/balance` and `/plan` commands.
-- Owner-only `/plan set <telegram_id> <free|pro|owner>` command.
+- `/plans` and `/upgrade` user commands for plan discovery and Pro requests.
+- Owner-only `/admin` command group with status, recent users, user usage, and
+  plan assignment.
 - Flyway migration for plan and monthly usage columns.
+- CI Docker image build gate.
+- CI Flyway migration check against a clean PostgreSQL database.
 
 ### Changed
 - `/usage` now shows the richer balance summary.
+- Owner plan assignment moved from `/plan set ...` to
+  `/admin plan <telegram_id> <free|pro|owner>`.
 - OpenAI requests are blocked before local rate-limit consumption when the
   user's monthly plan limit is already exhausted.
+- Tagged releases now require a matching non-empty `CHANGELOG.md` version
+  section, use it as GitHub Release notes, and upload the full changelog.
 
 ## [0.3.0] — 2026-04-28 — Bot UX and operations
 

@@ -13,6 +13,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **Per-user model selection** — each user can switch GPT models via `/model` buttons
 - **Settings overview** — `/settings` shows model, prompt summary, usage, and limits
 - **Billing-ready usage limits** — free/pro/owner plans with monthly token/message limits
+- **Plan UX** — users can view plans and request Pro; owners manage plans via `/admin`
 - **Rate limiting** — configurable per-user request limit (sliding window)
 - **Message encryption** — AES-256-GCM encryption for chat messages in DB (optional)
 - **Auto-cleanup** — old messages purged from DB after 30 days
@@ -29,10 +30,15 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 | `/start`           | Bot introduction                         |
 | `/usage`           | Show your balance and usage stats        |
 | `/balance`         | Show current plan, monthly usage and remaining limits |
-| `/plan`            | Show available plans                     |
-| `/plan set <telegram_id> <free\|pro\|owner>` | Assign a user plan (owner only) |
+| `/plan`, `/plans`  | Show available plans and Pro request button |
+| `/upgrade`         | Request Pro from the bot owner           |
 | `/reset`           | Reset conversation context + history     |
 | `/status`          | Show service status (owner only)         |
+| `/admin`           | Show owner/admin commands                |
+| `/admin status`    | Show service status                      |
+| `/admin users`     | Show recent users                        |
+| `/admin usage <telegram_id>` | Show a user's balance and usage |
+| `/admin plan <telegram_id> <free\|pro\|owner>` | Assign a user plan |
 | `/settings`        | Show model, prompt, usage, and limits    |
 | `/model`           | Show model picker buttons                |
 | `/model <name>`    | Switch to a different GPT model          |
@@ -223,6 +229,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - **Streaming fallback.** If an OpenAI streaming response fails, the bot retries once with a non-stream completion without consuming another local rate-limit slot.
 - **Structured logs.** Console logs include `request_id`, hashed Telegram user id, operation name, result, and duration for update handling.
 - **Container-friendly defaults.** `prod` logs to stdout only; the Dockerfile sets `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError`.
+- **Release gates.** CI runs Maven verification, Docker image build, and Flyway migrations against a clean PostgreSQL database before publishing tagged releases.
 
 ## Backup and restore
 

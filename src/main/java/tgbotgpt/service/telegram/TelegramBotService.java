@@ -459,8 +459,16 @@ public class TelegramBotService {
             handleBalanceCommand(update);
             return;
         }
-        if (text.startsWith("/plan")) {
+        if (text.startsWith("/plan") || text.startsWith("/plans")) {
             handlePlanCommand(update);
+            return;
+        }
+        if (text.startsWith("/upgrade")) {
+            handleUpgradeCommand(update);
+            return;
+        }
+        if (text.startsWith("/admin")) {
+            handleAdminCommand(update);
             return;
         }
 
@@ -515,17 +523,41 @@ public class TelegramBotService {
 
     private void processCallback(CallbackQuery callback) {
         String data = callback.data();
-        if (data == null || !data.startsWith("model:")) {
+        if (data == null) {
             bot.execute(new AnswerCallbackQuery(callback.id()).text("Unsupported action"));
             return;
         }
 
+        if (data.startsWith("model:")) {
+            handleModelCallback(callback, data);
+            return;
+        }
+        if ("plan:upgrade".equals(data)) {
+            handleUpgradeCallback(callback);
+            return;
+        }
+
+        bot.execute(new AnswerCallbackQuery(callback.id()).text("Unsupported action"));
+    }
+
+    private void handleModelCallback(CallbackQuery callback, String data) {
         String model = data.substring("model:".length()).trim();
         String result = gptService.setUserModel(callback.from().id(), model);
         bot.execute(new AnswerCallbackQuery(callback.id()).text(result));
         if (callback.message() != null) {
             editMessage(callback.message().chat().id(), callback.message().messageId(),
                     result + "\n\n" + gptService.getSettingsSummary(callback.from().id()));
+        }
+    }
+
+    private void handleUpgradeCallback(CallbackQuery callback) {
+        GptService.UpgradeRequest request = gptService.createUpgradeRequest(callback.from().id());
+        bot.execute(new AnswerCallbackQuery(callback.id()).text(request.userMessage()));
+        if (request.notifyOwners()) {
+            notifyOwners(request.ownerMessage());
+        }
+        if (callback.message() != null) {
+            editMessage(callback.message().chat().id(), callback.message().messageId(), request.userMessage());
         }
     }
 
@@ -569,23 +601,80 @@ public class TelegramBotService {
         String text = update.message().text().trim();
         Long userId = update.message().from().id();
 
-        if (text.equalsIgnoreCase("/plan")) {
-            sendReply(update, gptService.getPlanSummary(userId));
+        if (text.equalsIgnoreCase("/plan") || text.equalsIgnoreCase("/plans")) {
+            sendPlanMenu(update, gptService.getPlanSummary(userId));
             return;
         }
 
+        sendReply(update, "Usage: /plan, /plans, or /upgrade. Owner commands: /admin");
+    }
+
+    private void sendPlanMenu(Update update, String text) {
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        keyboard.addRow(new InlineKeyboardButton("Request PRO").callbackData("plan:upgrade"));
+        SendMessage request = new SendMessage(update.message().chat().id(), text)
+                .disableWebPagePreview(true)
+                .disableNotification(true)
+                .replyMarkup(keyboard);
+        SendResponse response = executeWithRetry(request, "send");
+        metrics.recordTelegramSend(false, response.isOk());
+        if (!response.isOk()) {
+            log.error("Failed to send plan menu: {}", response.description());
+        }
+    }
+
+    private void handleUpgradeCommand(Update update) {
+        GptService.UpgradeRequest request = gptService.createUpgradeRequest(update.message().from().id());
+        sendReply(update, request.userMessage());
+        if (request.notifyOwners()) {
+            notifyOwners(request.ownerMessage());
+        }
+    }
+
+    private void handleAdminCommand(Update update) {
+        String text = update.message().text().trim();
+        Long requesterId = update.message().from().id();
         String[] parts = text.split("\\s+");
-        if (parts.length == 4 && "set".equalsIgnoreCase(parts[1])) {
-            try {
-                Long targetUserId = Long.parseLong(parts[2]);
-                sendReply(update, gptService.setUserBillingPlan(userId, targetUserId, parts[3]));
-            } catch (NumberFormatException e) {
-                sendReply(update, "Usage: /plan set user id free|pro|owner");
-            }
+
+        if (parts.length == 1) {
+            sendReply(update, gptService.getAdminHelp(requesterId));
             return;
         }
 
-        sendReply(update, "Usage: /plan or /plan set user id free|pro|owner");
+        String action = parts[1].toLowerCase();
+        switch (action) {
+            case "status" -> handleStatusCommand(update);
+            case "users" -> sendReply(update, gptService.getAdminUsersSummary(requesterId));
+            case "usage" -> handleAdminUsageCommand(update, requesterId, parts);
+            case "plan" -> handleAdminPlanCommand(update, requesterId, parts);
+            default -> sendReply(update, gptService.getAdminHelp(requesterId));
+        }
+    }
+
+    private void handleAdminUsageCommand(Update update, Long requesterId, String[] parts) {
+        if (parts.length != 3) {
+            sendReply(update, "Usage: /admin usage <telegram_id>");
+            return;
+        }
+        try {
+            Long targetUserId = Long.parseLong(parts[2]);
+            sendReply(update, gptService.getAdminUserUsage(requesterId, targetUserId));
+        } catch (NumberFormatException e) {
+            sendReply(update, "Usage: /admin usage <telegram_id>");
+        }
+    }
+
+    private void handleAdminPlanCommand(Update update, Long requesterId, String[] parts) {
+        if (parts.length != 4) {
+            sendReply(update, "Usage: /admin plan <telegram_id> <free|pro|owner>");
+            return;
+        }
+        try {
+            Long targetUserId = Long.parseLong(parts[2]);
+            sendReply(update, gptService.setUserBillingPlan(requesterId, targetUserId, parts[3]));
+        } catch (NumberFormatException e) {
+            sendReply(update, "Usage: /admin plan <telegram_id> <free|pro|owner>");
+        }
     }
 
     private void presentation(Update update) {
