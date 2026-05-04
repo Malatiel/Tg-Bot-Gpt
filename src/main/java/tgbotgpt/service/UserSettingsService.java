@@ -3,11 +3,13 @@ package tgbotgpt.service;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tgbotgpt.model.entity.BotUser;
 import tgbotgpt.repository.BotUserRepository;
 
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -49,6 +51,9 @@ public class UserSettingsService {
 
     @Value("${billing.pro.monthly.messages:2000}")
     private int proMonthlyMessages;
+
+    @Value("${billing.pro.default.days:30}")
+    private int proDefaultDays;
 
     private Set<String> allowedModels;
     private final BotUserRepository userRepository;
@@ -164,13 +169,39 @@ public class UserSettingsService {
 
     @Transactional
     public boolean setBillingPlan(Long userId, String plan) {
+        return setBillingPlan(userId, plan, proDefaultDays);
+    }
+
+    @Transactional
+    public boolean setBillingPlan(Long userId, String plan, int days) {
         String normalized = plan == null ? "" : plan.trim().toLowerCase(Locale.ROOT);
         if (!isKnownPlan(normalized)) {
             return false;
         }
         BotUser user = getOrCreateUser(userId, null, null);
         ensureCurrentBillingPeriod(user);
-        user.setBillingPlan(normalized);
+        applyBillingPlan(user, normalized, days, false);
+        userRepository.save(user);
+        return true;
+    }
+
+    @Transactional
+    public boolean extendProPlan(Long userId, int days) {
+        if (days <= 0) {
+            return false;
+        }
+        BotUser user = getOrCreateUser(userId, null, null);
+        ensureCurrentBillingPeriod(user);
+        applyBillingPlan(user, "pro", days, true);
+        userRepository.save(user);
+        return true;
+    }
+
+    @Transactional
+    public boolean downgradeToFree(Long userId) {
+        BotUser user = getOrCreateUser(userId, null, null);
+        ensureCurrentBillingPeriod(user);
+        applyBillingPlan(user, "free", 0, false);
         userRepository.save(user);
         return true;
     }
@@ -189,7 +220,8 @@ public class UserSettingsService {
                 user.getPeriodTokensUsed(),
                 user.getPeriodMessages(),
                 tokenLimit(plan),
-                messageLimit(plan)
+                messageLimit(plan),
+                user.getPlanExpiresAt()
         );
     }
 
@@ -295,6 +327,7 @@ public class UserSettingsService {
                         user.getTelegramId(),
                         user.getUsername(),
                         normalizePlan(user.getBillingPlan()),
+                        user.getPlanExpiresAt(),
                         user.getUsagePeriod(),
                         user.getPeriodTokensUsed(),
                         user.getPeriodMessages(),
@@ -304,11 +337,38 @@ public class UserSettingsService {
                 .toList();
     }
 
+    @Scheduled(cron = "${billing.expiration.cleanup.cron:0 15 3 * * *}")
+    @Transactional
+    public void cleanupExpiredPlans() {
+        int downgraded = downgradeExpiredPlans();
+        if (downgraded > 0) {
+            log.info("Downgraded {} expired Pro users to Free", downgraded);
+        }
+    }
+
+    @Transactional
+    public int downgradeExpiredPlans() {
+        List<BotUser> expired = userRepository.findByBillingPlanAndPlanExpiresAtBefore("pro", LocalDateTime.now());
+        expired.forEach(user -> applyBillingPlan(user, "free", 0, false));
+        userRepository.saveAll(expired);
+        return expired.size();
+    }
+
     private void ensureBillingDefaults(BotUser user) {
         if (user.getBillingPlan() == null || user.getBillingPlan().isBlank()) {
             user.setBillingPlan(normalizePlan(defaultBillingPlan));
         } else {
             user.setBillingPlan(normalizePlan(user.getBillingPlan()));
+        }
+        if ("pro".equals(user.getBillingPlan()) && isExpired(user.getPlanExpiresAt())) {
+            user.setBillingPlan("free");
+            user.setPlanExpiresAt(null);
+        }
+        if ("pro".equals(user.getBillingPlan()) && user.getPlanExpiresAt() == null) {
+            user.setPlanExpiresAt(LocalDateTime.now().plusDays(Math.max(1, proDefaultDays)));
+        }
+        if (!"pro".equals(user.getBillingPlan())) {
+            user.setPlanExpiresAt(null);
         }
         if (user.getUsagePeriod() == null || user.getUsagePeriod().isBlank()) {
             user.setUsagePeriod(currentPeriod());
@@ -340,6 +400,24 @@ public class UserSettingsService {
 
     private boolean isKnownPlan(String plan) {
         return "free".equals(plan) || "pro".equals(plan) || "owner".equals(plan);
+    }
+
+    private void applyBillingPlan(BotUser user, String plan, int days, boolean extend) {
+        user.setBillingPlan(plan);
+        if ("pro".equals(plan)) {
+            int actualDays = Math.max(1, days);
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime base = extend && user.getPlanExpiresAt() != null && user.getPlanExpiresAt().isAfter(now)
+                    ? user.getPlanExpiresAt()
+                    : now;
+            user.setPlanExpiresAt(base.plusDays(actualDays));
+            return;
+        }
+        user.setPlanExpiresAt(null);
+    }
+
+    private boolean isExpired(LocalDateTime expiresAt) {
+        return expiresAt != null && !expiresAt.isAfter(LocalDateTime.now());
     }
 
     private int tokenLimit(String plan) {
@@ -374,7 +452,8 @@ public class UserSettingsService {
             int periodTokensUsed,
             int periodMessages,
             int tokenLimit,
-            int messageLimit
+            int messageLimit,
+            LocalDateTime planExpiresAt
     ) {
         public boolean unlimited() {
             return tokenLimit < 0 && messageLimit < 0;
@@ -393,6 +472,7 @@ public class UserSettingsService {
             Long telegramId,
             String username,
             String plan,
+            LocalDateTime planExpiresAt,
             String period,
             int periodTokensUsed,
             int periodMessages,

@@ -280,6 +280,41 @@ class TelegramBotServiceTest {
     }
 
     @Test
+    void adminApproveCommandDelegatesToGptService() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        when(gptService.approveUserPro(1L, 2L, 30)).thenReturn("Plan for 2 set to: pro until 2026-05-30 12:00");
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/admin approve 2 30d"));
+
+        verify(gptService).approveUserPro(1L, 2L, 30);
+    }
+
+    @Test
+    void adminExtendAndDowngradeCommandsDelegateToGptService() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        when(gptService.extendUserPro(1L, 2L, 15)).thenReturn("Plan for 2 set to: pro until 2026-06-14 12:00");
+        when(gptService.downgradeUser(1L, 2L)).thenReturn("Plan for 2 set to: free");
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/admin extend 2 15d"));
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/admin downgrade 2"));
+
+        verify(gptService).extendUserPro(1L, 2L, 15);
+        verify(gptService).downgradeUser(1L, 2L);
+    }
+
+    @Test
     void upgradeCommandRepliesAndNotifiesOwners() {
         TelegramBot bot = mock(TelegramBot.class);
         GptService gptService = mock(GptService.class);
@@ -287,7 +322,7 @@ class TelegramBotServiceTest {
         BotMetricsService metrics = mock(BotMetricsService.class);
         when(gptService.createUpgradeRequest(1L)).thenReturn(new GptService.UpgradeRequest(
                 "Upgrade request sent.",
-                "Approve Pro: /admin plan 1 pro",
+                "Approve Pro: /admin approve 1 30d",
                 true
         ));
         when(adminService.getOwnerIds()).thenReturn(Set.of(99L));
@@ -303,7 +338,7 @@ class TelegramBotServiceTest {
         assertTrue(captor.getAllValues().stream()
                 .anyMatch(request -> "Upgrade request sent.".equals(request.getParameters().get("text"))));
         assertTrue(captor.getAllValues().stream()
-                .anyMatch(request -> "Approve Pro: /admin plan 1 pro".equals(request.getParameters().get("text"))));
+                .anyMatch(request -> "Approve Pro: /admin approve 1 30d".equals(request.getParameters().get("text"))));
     }
 
     @Test

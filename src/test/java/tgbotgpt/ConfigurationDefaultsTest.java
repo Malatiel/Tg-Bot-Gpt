@@ -59,6 +59,9 @@ class ConfigurationDefaultsTest {
         assertEquals("${BILLING_FREE_MONTHLY_MESSAGES:100}", properties.getProperty("billing.free.monthly.messages"));
         assertEquals("${BILLING_PRO_MONTHLY_TOKENS:1000000}", properties.getProperty("billing.pro.monthly.tokens"));
         assertEquals("${BILLING_PRO_MONTHLY_MESSAGES:2000}", properties.getProperty("billing.pro.monthly.messages"));
+        assertEquals("${BILLING_PRO_DEFAULT_DAYS:30}", properties.getProperty("billing.pro.default.days"));
+        assertEquals("${BILLING_EXPIRATION_CLEANUP_CRON:0 15 3 * * *}",
+                properties.getProperty("billing.expiration.cleanup.cron"));
     }
 
     @Test

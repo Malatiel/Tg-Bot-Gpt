@@ -25,6 +25,8 @@ development see [README.md](README.md).
 | `BILLING_FREE_MONTHLY_MESSAGES` | optional        | Free-plan monthly message limit                                      |
 | `BILLING_PRO_MONTHLY_TOKENS` | optional           | Pro-plan monthly token limit                                         |
 | `BILLING_PRO_MONTHLY_MESSAGES` | optional         | Pro-plan monthly message limit                                       |
+| `BILLING_PRO_DEFAULT_DAYS`  | optional           | Default Pro duration for owner approvals, `30` by default            |
+| `BILLING_EXPIRATION_CLEANUP_CRON` | optional     | Cron for automatic expired-Pro cleanup                               |
 | `BOT_WHITELIST`              | optional           | Comma-separated user IDs/usernames/group names; empty = open access  |
 
 ## Profiles
@@ -178,10 +180,15 @@ assign plans from Telegram:
 /balance
 /plan
 /upgrade
-/admin plan <telegram_id> <free|pro|owner>
+/admin approve <telegram_id> [days]
+/admin extend <telegram_id> <days>
+/admin downgrade <telegram_id>
+/admin plan <telegram_id> <free|pro|owner> [days]
 ```
 
-Limits reset automatically when the `YYYY-MM` usage period changes.
+Limits reset automatically when the `YYYY-MM` usage period changes. Pro plans
+expire at `plan_expires_at`; expired Pro users are downgraded to `free` during
+usage checks and by the scheduled cleanup job.
 
 ## Backup and restore
 

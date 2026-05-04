@@ -9,6 +9,8 @@ import org.springframework.test.context.TestPropertySource;
 import tgbotgpt.model.entity.BotUser;
 import tgbotgpt.repository.BotUserRepository;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @DataJpaTest
@@ -23,7 +25,8 @@ import static org.junit.jupiter.api.Assertions.*;
         "billing.free.monthly.tokens=100",
         "billing.free.monthly.messages=2",
         "billing.pro.monthly.tokens=1000",
-        "billing.pro.monthly.messages=20"
+        "billing.pro.monthly.messages=20",
+        "billing.pro.default.days=30"
 })
 class UserSettingsServiceTest {
 
@@ -148,9 +151,79 @@ class UserSettingsServiceTest {
         UserSettingsService.UsageStatus status = service.getUsageStatus(1L, false);
 
         assertEquals("pro", status.plan());
+        assertNotNull(status.planExpiresAt());
+        assertTrue(status.planExpiresAt().isAfter(LocalDateTime.now().plusDays(29)));
         assertEquals(1000, status.tokenLimit());
         assertEquals(20, status.messageLimit());
         assertEquals(900, status.remainingTokens());
+    }
+
+    @Test
+    void shouldApproveProForSpecificNumberOfDays() {
+        assertTrue(service.setBillingPlan(1L, "pro", 7));
+
+        UserSettingsService.UsageStatus status = service.getUsageStatus(1L, false);
+
+        assertEquals("pro", status.plan());
+        assertNotNull(status.planExpiresAt());
+        assertTrue(status.planExpiresAt().isAfter(LocalDateTime.now().plusDays(6)));
+        assertTrue(status.planExpiresAt().isBefore(LocalDateTime.now().plusDays(8)));
+    }
+
+    @Test
+    void shouldDowngradeExpiredProToFree() {
+        BotUser user = new BotUser(1L, "test", "Test");
+        user.setBillingPlan("pro");
+        user.setPlanExpiresAt(LocalDateTime.now().minusMinutes(1));
+        userRepository.save(user);
+
+        UserSettingsService.UsageStatus status = service.getUsageStatus(1L, false);
+
+        assertEquals("free", status.plan());
+        assertNull(status.planExpiresAt());
+    }
+
+    @Test
+    void shouldGiveLegacyProWithoutExpiryDefaultExpiry() {
+        BotUser user = new BotUser(1L, "test", "Test");
+        user.setBillingPlan("pro");
+        user.setPlanExpiresAt(null);
+        userRepository.save(user);
+
+        UserSettingsService.UsageStatus status = service.getUsageStatus(1L, false);
+
+        assertEquals("pro", status.plan());
+        assertNotNull(status.planExpiresAt());
+        assertTrue(status.planExpiresAt().isAfter(LocalDateTime.now().plusDays(29)));
+    }
+
+    @Test
+    void shouldCleanupExpiredPlans() {
+        BotUser expired = new BotUser(1L, "expired", "Expired");
+        expired.setBillingPlan("pro");
+        expired.setPlanExpiresAt(LocalDateTime.now().minusDays(1));
+        userRepository.save(expired);
+        BotUser active = new BotUser(2L, "active", "Active");
+        active.setBillingPlan("pro");
+        active.setPlanExpiresAt(LocalDateTime.now().plusDays(1));
+        userRepository.save(active);
+
+        assertEquals(1, service.downgradeExpiredPlans());
+
+        assertEquals("free", userRepository.findById(1L).orElseThrow().getBillingPlan());
+        assertNull(userRepository.findById(1L).orElseThrow().getPlanExpiresAt());
+        assertEquals("pro", userRepository.findById(2L).orElseThrow().getBillingPlan());
+    }
+
+    @Test
+    void shouldExtendProFromExistingFutureExpiry() {
+        assertTrue(service.setBillingPlan(1L, "pro", 7));
+        LocalDateTime firstExpiry = service.getUsageStatus(1L, false).planExpiresAt();
+
+        assertTrue(service.extendProPlan(1L, 7));
+
+        LocalDateTime extendedExpiry = service.getUsageStatus(1L, false).planExpiresAt();
+        assertTrue(extendedExpiry.isAfter(firstExpiry.plusDays(6)));
     }
 
     @Test

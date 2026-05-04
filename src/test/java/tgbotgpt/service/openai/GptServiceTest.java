@@ -28,6 +28,7 @@ import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -526,7 +527,7 @@ class GptServiceTest {
         when(userSettings.getUserTokens(1L)).thenReturn(123);
         when(userSettings.getUserMessages(1L)).thenReturn(4);
         when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
-                "free", "2026-04", 123, 4, 100, 2, 50000, 100
+                "free", "2026-04", 123, 4, 100, 2, 50000, 100, null
         ));
         when(rateLimiter.getMaxRequests()).thenReturn(10);
         when(rateLimiter.getWindowSeconds()).thenReturn(60);
@@ -558,8 +559,9 @@ class GptServiceTest {
 
     @Test
     void shouldBuildBalanceAndPlanSummaries() {
+        LocalDateTime expiresAt = LocalDateTime.of(2026, 5, 30, 12, 0);
         when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
-                "pro", "2026-04", 1000, 20, 300, 5, 1000000, 2000
+                "pro", "2026-04", 1000, 20, 300, 5, 1000000, 2000, expiresAt
         ));
         when(userSettings.getMonthlyTokenLimit("free")).thenReturn(50000);
         when(userSettings.getMonthlyMessageLimit("free")).thenReturn(100);
@@ -570,6 +572,7 @@ class GptServiceTest {
         String plan = gptService.getPlanSummary(1L);
 
         assertTrue(balance.contains("Plan: PRO"));
+        assertTrue(balance.contains("Plan expires: 2026-05-30 12:00"));
         assertTrue(balance.contains("Tokens this month: 300/1000000"));
         assertTrue(plan.contains("FREE - 50000 tokens/month"));
         assertTrue(plan.contains("PRO - 1000000 tokens/month"));
@@ -580,30 +583,49 @@ class GptServiceTest {
     void shouldLetOwnerSetUserBillingPlan() {
         when(adminService.isOwner(99L)).thenReturn(true);
         when(userSettings.setBillingPlan(1L, "pro")).thenReturn(true);
+        when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
+                "pro", "2026-04", 0, 0, 0, 0, 1000000, 2000,
+                LocalDateTime.of(2026, 5, 30, 12, 0)
+        ));
 
         String result = gptService.setUserBillingPlan(99L, 1L, "pro");
 
-        assertEquals("Plan for 1 set to: pro", result);
+        assertEquals("Plan for 1 set to: pro until 2026-05-30 12:00", result);
+    }
+
+    @Test
+    void shouldApproveAndExtendProPlan() {
+        when(adminService.isOwner(99L)).thenReturn(true);
+        when(userSettings.setBillingPlan(1L, "pro", 30)).thenReturn(true);
+        when(userSettings.extendProPlan(1L, 15)).thenReturn(true);
+        when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
+                "pro", "2026-04", 0, 0, 0, 0, 1000000, 2000,
+                LocalDateTime.of(2026, 5, 30, 12, 0)
+        ));
+
+        assertEquals("Plan for 1 set to: pro until 2026-05-30 12:00", gptService.approveUserPro(99L, 1L, 30));
+        assertEquals("Plan for 1 set to: pro until 2026-05-30 12:00", gptService.extendUserPro(99L, 1L, 15));
     }
 
     @Test
     void shouldCreateUpgradeRequestForFreeUser() {
         when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
-                "free", "2026-04", 0, 0, 0, 0, 50000, 100
+                "free", "2026-04", 0, 0, 0, 0, 50000, 100, null
         ));
 
         GptService.UpgradeRequest request = gptService.createUpgradeRequest(1L);
 
         assertTrue(request.notifyOwners());
         assertTrue(request.userMessage().contains("Upgrade request sent."));
-        assertTrue(request.ownerMessage().contains("/admin plan 1 pro"));
+        assertTrue(request.ownerMessage().contains("/admin approve 1 30d"));
     }
 
     @Test
     void shouldBuildAdminUsersSummaryForOwner() {
         when(adminService.isOwner(99L)).thenReturn(true);
         when(userSettings.getRecentUsers(10)).thenReturn(List.of(new UserSettingsService.AdminUserSummary(
-                1L, "alice", "pro", "2026-04", 100, 2, 1000, 20
+                1L, "alice", "pro", LocalDateTime.of(2026, 5, 30, 12, 0),
+                "2026-04", 100, 2, 1000, 20
         )));
 
         String result = gptService.getAdminUsersSummary(99L);

@@ -26,6 +26,7 @@ class BotUserTest {
         assertEquals(0, user.getTotalTokensUsed());
         assertEquals(0, user.getTotalMessages());
         assertEquals("free", user.getBillingPlan());
+        assertNull(user.getPlanExpiresAt());
         assertEquals(0, user.getPeriodTokensUsed());
         assertEquals(0, user.getPeriodMessages());
 

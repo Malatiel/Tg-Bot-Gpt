@@ -647,6 +647,9 @@ public class TelegramBotService {
             case "users" -> sendReply(update, gptService.getAdminUsersSummary(requesterId));
             case "usage" -> handleAdminUsageCommand(update, requesterId, parts);
             case "plan" -> handleAdminPlanCommand(update, requesterId, parts);
+            case "approve" -> handleAdminApproveCommand(update, requesterId, parts);
+            case "extend" -> handleAdminExtendCommand(update, requesterId, parts);
+            case "downgrade" -> handleAdminDowngradeCommand(update, requesterId, parts);
             default -> sendReply(update, gptService.getAdminHelp(requesterId));
         }
     }
@@ -665,15 +668,89 @@ public class TelegramBotService {
     }
 
     private void handleAdminPlanCommand(Update update, Long requesterId, String[] parts) {
-        if (parts.length != 4) {
-            sendReply(update, "Usage: /admin plan <telegram_id> <free|pro|owner>");
+        if (parts.length != 4 && parts.length != 5) {
+            sendReply(update, "Usage: /admin plan <telegram_id> <free|pro|owner> [days]");
             return;
         }
         try {
             Long targetUserId = Long.parseLong(parts[2]);
+            if (parts.length == 5 && "pro".equalsIgnoreCase(parts[3])) {
+                Integer days = parseDays(parts[4]);
+                if (days == null) {
+                    sendReply(update, "Usage: /admin plan <telegram_id> pro <days>");
+                    return;
+                }
+                sendReply(update, gptService.approveUserPro(requesterId, targetUserId, days));
+                return;
+            }
             sendReply(update, gptService.setUserBillingPlan(requesterId, targetUserId, parts[3]));
         } catch (NumberFormatException e) {
-            sendReply(update, "Usage: /admin plan <telegram_id> <free|pro|owner>");
+            sendReply(update, "Usage: /admin plan <telegram_id> <free|pro|owner> [days]");
+        }
+    }
+
+    private void handleAdminApproveCommand(Update update, Long requesterId, String[] parts) {
+        if (parts.length != 3 && parts.length != 4) {
+            sendReply(update, "Usage: /admin approve <telegram_id> [days]");
+            return;
+        }
+        try {
+            Long targetUserId = Long.parseLong(parts[2]);
+            Integer days = parts.length == 4 ? parseDays(parts[3]) : 30;
+            if (days == null) {
+                sendReply(update, "Usage: /admin approve <telegram_id> [days]");
+                return;
+            }
+            sendReply(update, gptService.approveUserPro(requesterId, targetUserId, days));
+        } catch (NumberFormatException e) {
+            sendReply(update, "Usage: /admin approve <telegram_id> [days]");
+        }
+    }
+
+    private void handleAdminExtendCommand(Update update, Long requesterId, String[] parts) {
+        if (parts.length != 4) {
+            sendReply(update, "Usage: /admin extend <telegram_id> <days>");
+            return;
+        }
+        try {
+            Long targetUserId = Long.parseLong(parts[2]);
+            Integer days = parseDays(parts[3]);
+            if (days == null) {
+                sendReply(update, "Usage: /admin extend <telegram_id> <days>");
+                return;
+            }
+            sendReply(update, gptService.extendUserPro(requesterId, targetUserId, days));
+        } catch (NumberFormatException e) {
+            sendReply(update, "Usage: /admin extend <telegram_id> <days>");
+        }
+    }
+
+    private void handleAdminDowngradeCommand(Update update, Long requesterId, String[] parts) {
+        if (parts.length != 3) {
+            sendReply(update, "Usage: /admin downgrade <telegram_id>");
+            return;
+        }
+        try {
+            Long targetUserId = Long.parseLong(parts[2]);
+            sendReply(update, gptService.downgradeUser(requesterId, targetUserId));
+        } catch (NumberFormatException e) {
+            sendReply(update, "Usage: /admin downgrade <telegram_id>");
+        }
+    }
+
+    private Integer parseDays(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toLowerCase();
+        if (normalized.endsWith("d")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        try {
+            int days = Integer.parseInt(normalized);
+            return days > 0 ? days : null;
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

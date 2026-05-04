@@ -38,7 +38,10 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 | `/admin status`    | Show service status                      |
 | `/admin users`     | Show recent users                        |
 | `/admin usage <telegram_id>` | Show a user's balance and usage |
-| `/admin plan <telegram_id> <free\|pro\|owner>` | Assign a user plan |
+| `/admin approve <telegram_id> [days]` | Approve Pro for a limited period |
+| `/admin extend <telegram_id> <days>` | Extend Pro from its current expiry |
+| `/admin downgrade <telegram_id>` | Move a user back to Free |
+| `/admin plan <telegram_id> <free\|pro\|owner> [days]` | Assign a user plan |
 | `/settings`        | Show model, prompt, usage, and limits    |
 | `/model`           | Show model picker buttons                |
 | `/model <name>`    | Switch to a different GPT model          |
@@ -94,6 +97,7 @@ BILLING_FREE_MONTHLY_TOKENS=50000
 BILLING_FREE_MONTHLY_MESSAGES=100
 BILLING_PRO_MONTHLY_TOKENS=1000000
 BILLING_PRO_MONTHLY_MESSAGES=2000
+BILLING_PRO_DEFAULT_DAYS=30
 ENCRYPTION_KEY=optional-base64-key
 ENCRYPTION_REQUIRED=false
 ```
@@ -178,6 +182,8 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `billing.free.monthly.messages` | Monthly message limit for free users | `${BILLING_FREE_MONTHLY_MESSAGES:100}` |
 | `billing.pro.monthly.tokens`   | Monthly token limit for pro users    | `${BILLING_PRO_MONTHLY_TOKENS:1000000}` |
 | `billing.pro.monthly.messages` | Monthly message limit for pro users  | `${BILLING_PRO_MONTHLY_MESSAGES:2000}` |
+| `billing.pro.default.days`     | Default Pro duration for admin assignment | `${BILLING_PRO_DEFAULT_DAYS:30}` |
+| `billing.expiration.cleanup.cron` | Cron for expired Pro cleanup       | `${BILLING_EXPIRATION_CLEANUP_CRON:0 15 3 * * *}` |
 | `encryption.key`               | AES-256 key, base64 (empty = disabled) | empty               |
 | `encryption.required`          | Fail startup when encryption key is missing or invalid | `false` (`true` in `prod`) |
 | `bot.document.max.size.mb`     | Max document file size in MB         | `10`                  |

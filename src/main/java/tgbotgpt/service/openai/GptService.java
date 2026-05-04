@@ -25,6 +25,8 @@ import tgbotgpt.utils.UpdateUtils;
 
 import tgbotgpt.model.entity.ChatMessage;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -33,6 +35,8 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class GptService {
+
+    private static final DateTimeFormatter PLAN_EXPIRY_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private final OpenAIApiClient client;
     private final OpenAIResponsesApiClient responsesClient;
@@ -394,6 +398,7 @@ public class GptService {
         return """
                 Settings
                 Plan: %s
+                Plan expires: %s
                 Model: %s
                 Available models: %s
                 Prompt: %s
@@ -403,6 +408,7 @@ public class GptService {
                 History: up to %d messages and about %d tokens
                 """.formatted(
                 usage.plan().toUpperCase(Locale.ROOT),
+                formatPlanExpiry(usage.plan(), usage.planExpiresAt()),
                 getUserModel(userId),
                 getAvailableModels(),
                 summarizePrompt(userSettings.getSystemPrompt(userId)),
@@ -441,12 +447,14 @@ public class GptService {
         return """
                 Balance
                 Plan: %s
+                Plan expires: %s
                 Period: %s
                 Tokens this month: %d/%s (%s remaining)
                 Messages this month: %d/%s (%s remaining)
                 Lifetime usage: %d tokens, %d messages
                 """.formatted(
                 status.plan().toUpperCase(Locale.ROOT),
+                formatPlanExpiry(status.plan(), status.planExpiresAt()),
                 status.period(),
                 status.periodTokensUsed(),
                 formatLimit(status.tokenLimit()),
@@ -463,6 +471,7 @@ public class GptService {
         UserSettingsService.UsageStatus status = userSettings.getUsageStatus(userId, adminService.isOwner(userId));
         return """
                 Current plan: %s
+                Current plan expires: %s
 
                 Available plans:
                 FREE - %s tokens/month, %s messages/month
@@ -473,6 +482,7 @@ public class GptService {
                 Use /upgrade to request Pro.
                 """.formatted(
                 status.plan().toUpperCase(Locale.ROOT),
+                formatPlanExpiry(status.plan(), status.planExpiresAt()),
                 formatLimit(userSettings.getMonthlyTokenLimit("free")),
                 formatLimit(userSettings.getMonthlyMessageLimit("free")),
                 formatLimit(userSettings.getMonthlyTokenLimit("pro")),
@@ -485,12 +495,49 @@ public class GptService {
             return "Sorry, this command is only available to the bot owner.";
         }
         if (targetUserId == null) {
-            return "Usage: /admin plan <telegram_id> <free|pro|owner>";
+            return "Usage: /admin plan <telegram_id> <free|pro|owner> [days]";
         }
         if (userSettings.setBillingPlan(targetUserId, plan)) {
-            return "Plan for " + targetUserId + " set to: " + plan.toLowerCase(Locale.ROOT);
+            return planChangedMessage(targetUserId);
         }
         return "Unknown plan. Available: free, pro, owner";
+    }
+
+    public String approveUserPro(Long requesterId, Long targetUserId, int days) {
+        if (!adminService.isOwner(requesterId)) {
+            return "Sorry, this command is only available to the bot owner.";
+        }
+        if (targetUserId == null || days <= 0) {
+            return "Usage: /admin approve <telegram_id> <days>";
+        }
+        if (userSettings.setBillingPlan(targetUserId, "pro", days)) {
+            return planChangedMessage(targetUserId);
+        }
+        return "Unable to approve Pro.";
+    }
+
+    public String extendUserPro(Long requesterId, Long targetUserId, int days) {
+        if (!adminService.isOwner(requesterId)) {
+            return "Sorry, this command is only available to the bot owner.";
+        }
+        if (targetUserId == null || days <= 0) {
+            return "Usage: /admin extend <telegram_id> <days>";
+        }
+        if (userSettings.extendProPlan(targetUserId, days)) {
+            return planChangedMessage(targetUserId);
+        }
+        return "Unable to extend Pro.";
+    }
+
+    public String downgradeUser(Long requesterId, Long targetUserId) {
+        if (!adminService.isOwner(requesterId)) {
+            return "Sorry, this command is only available to the bot owner.";
+        }
+        if (targetUserId == null) {
+            return "Usage: /admin downgrade <telegram_id>";
+        }
+        userSettings.downgradeToFree(targetUserId);
+        return planChangedMessage(targetUserId);
     }
 
     public UpgradeRequest createUpgradeRequest(Long userId) {
@@ -512,7 +559,7 @@ public class GptService {
                 Upgrade request from Telegram user %d.
                 Current plan: %s
                 Review: /admin usage %d
-                Approve Pro: /admin plan %d pro
+                Approve Pro: /admin approve %d 30d
                 """.formatted(userId, status.plan().toUpperCase(Locale.ROOT), userId, userId).strip();
         return new UpgradeRequest(userMessage, ownerMessage, true);
     }
@@ -526,7 +573,10 @@ public class GptService {
                 /admin status
                 /admin users
                 /admin usage <telegram_id>
-                /admin plan <telegram_id> <free|pro|owner>
+                /admin plan <telegram_id> <free|pro|owner> [days]
+                /admin approve <telegram_id> <days>
+                /admin extend <telegram_id> <days>
+                /admin downgrade <telegram_id>
                 """.strip();
     }
 
@@ -539,10 +589,11 @@ public class GptService {
             return "No users yet.";
         }
         return users.stream()
-                .map(user -> "%d%s - %s, %s, %d tokens, %d messages".formatted(
+                .map(user -> "%d%s - %s, expires %s, %s, %d tokens, %d messages".formatted(
                         user.telegramId(),
                         formatUsername(user.username()),
                         user.plan().toUpperCase(Locale.ROOT),
+                        formatPlanExpiry(user.plan(), user.planExpiresAt()),
                         user.period(),
                         user.periodTokensUsed(),
                         user.periodMessages()
@@ -567,6 +618,36 @@ public class GptService {
             return "";
         }
         return " @" + username;
+    }
+
+    private String planChangedMessage(Long targetUserId) {
+        UserSettingsService.UsageStatus status = userSettings.getUsageStatus(targetUserId, false);
+        return "Plan for %d set to: %s%s".formatted(
+                targetUserId,
+                status.plan().toLowerCase(Locale.ROOT),
+                planExpirySuffix(status.plan(), status.planExpiresAt())
+        );
+    }
+
+    private String planExpirySuffix(String plan, LocalDateTime expiresAt) {
+        if (!"pro".equals(plan) || expiresAt == null) {
+            return "";
+        }
+        return " until " + formatDateTime(expiresAt);
+    }
+
+    private String formatPlanExpiry(String plan, LocalDateTime expiresAt) {
+        if ("owner".equals(plan)) {
+            return "never";
+        }
+        if (!"pro".equals(plan)) {
+            return "not applicable";
+        }
+        return expiresAt == null ? "not set" : formatDateTime(expiresAt);
+    }
+
+    private String formatDateTime(LocalDateTime dateTime) {
+        return PLAN_EXPIRY_FORMAT.format(dateTime);
     }
 
     private void ensureUser(Update update) {

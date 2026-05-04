@@ -5,6 +5,19 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-04 — Expiring subscriptions
+
+### Added
+- Expiring Pro subscriptions with `plan_expires_at` and a Flyway migration.
+- Owner commands to approve, extend, and downgrade plans:
+  `/admin approve`, `/admin extend`, and `/admin downgrade`.
+- Scheduled cleanup for expired Pro users.
+
+### Changed
+- `/balance`, `/settings`, `/plan`, and `/admin users` now show plan expiry.
+- Pro approvals now default to a limited duration instead of an indefinite
+  assignment.
+
 ## [0.5.0] — 2026-04-30 — Plan UX and release reliability
 
 ### Added
