@@ -269,7 +269,12 @@ public class UserSettingsService {
             Pattern.compile("\\bDAN\\s+mode\\b", Pattern.CASE_INSENSITIVE),
             Pattern.compile("do\\s+anything\\s+now", Pattern.CASE_INSENSITIVE),
             Pattern.compile("\\bsystem\\s*:\\s*", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("\\]\\s*\\}.*\\{\\s*\"role\"\\s*:", Pattern.CASE_INSENSITIVE)
+            Pattern.compile("\\]\\s*\\}.*\\{\\s*\"role\"\\s*:", Pattern.CASE_INSENSITIVE),
+            // Russian-language override/jailbreak phrasing (the bot is primarily Russian-speaking,
+            // so English-only patterns would let the most likely attacks through).
+            Pattern.compile("(игнорируй|проигнорируй|забудь|не\\s+обращай\\s+внимани[ея]\\s+на)\\s+(все\\s+|всё\\s+)?(предыдущие|прошлые|прежние|вышеуказанные|ранее\\s+данные)\\s+(инструкции|правила|указания|команды|промпт[ыа]?)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE),
+            Pattern.compile("теперь\\s+ты\\s+(DAN|без\\s+ограничений|в\\s+режиме\\s+разработчика|джейлбрейкнут)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE),
+            Pattern.compile("режим\\s+DAN", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
     );
 
     /**

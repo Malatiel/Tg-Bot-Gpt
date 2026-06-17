@@ -5,6 +5,22 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Access control is now fail-closed**: an empty `bot.whitelist` means owner-only
+  access instead of open-to-all, so a deployment that forgets to configure a
+  whitelist no longer exposes the bot (and the OpenAI key behind it) to everyone.
+  A startup warning is logged when the whitelist is empty, and an error when both
+  the whitelist and `bot.owner.ids` are empty (the bot then rejects all users).
+- `pom.xml` version aligned with the changelog (`0.6.0`); it had lagged at `0.3.0`
+  and surfaced the wrong version via `/actuator/info` and `/status`.
+
+### Security
+- Encryption no longer silently falls back to storing plaintext when
+  `encryption.required=true` and an encrypt operation fails — it now fails the
+  operation instead.
+- Prompt injection heuristics now also cover common Russian-language override and
+  jailbreak phrasing (the bot is primarily Russian-speaking).
+
 ## [0.6.0] — 2026-05-04 — Expiring subscriptions
 
 ### Added

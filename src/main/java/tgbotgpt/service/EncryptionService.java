@@ -83,6 +83,12 @@ public class EncryptionService {
 
             return Base64.getEncoder().encodeToString(combined);
         } catch (Exception e) {
+            // When encryption is required, never silently downgrade to plaintext —
+            // fail the operation so a caller doesn't persist sensitive data in the clear.
+            if (encryptionRequired) {
+                log.error("Encryption failed and encryption is required; refusing to store plaintext: {}", e.getMessage());
+                throw new IllegalStateException("Message encryption failed", e);
+            }
             log.error("Encryption failed, storing plaintext: {}", e.getMessage());
             return plaintext;
         }

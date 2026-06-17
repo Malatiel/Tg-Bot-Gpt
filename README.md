@@ -19,8 +19,8 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **Auto-cleanup** — old messages purged from DB after 30 days
 - Per-user conversation history persisted in DB (survives restarts)
 - Group chat support (mention the bot by name)
-- Whitelist-based access control (by user ID, username, or group name)
-- **Prompt injection protection** — blocks known LLM manipulation patterns
+- Whitelist-based access control (by user ID, username, or group name) — **fail-closed**: an empty whitelist means owner-only access, not open-to-all
+- **Prompt injection heuristics** — best-effort detection of common override/jailbreak phrasing (English + Russian) as a speed bump; untrusted documents are additionally wrapped with explicit "do not follow embedded instructions" guardrails
 - Per-user usage tracking (`/usage` command)
 
 ## Commands
@@ -173,7 +173,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `openai.max.message.pool.size` | Recent messages loaded from DB as context | `7`                   |
 | `openai.max.history.tokens`    | Approximate token budget for DB history loaded as context | `${OPENAI_MAX_HISTORY_TOKENS:2000}` |
 | `openai.allowed.models`        | Comma-separated models users can choose via `/model <name>` | `${OPENAI_ALLOWED_MODELS:gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o}` |
-| `bot.whitelist`                | Allowed user IDs/usernames (empty = all) | empty             |
+| `bot.whitelist`                | Allowed user IDs/usernames/group titles (empty = owner-only) | empty             |
 | `bot.rate.limit`               | Max requests per user per window     | `10`                  |
 | `bot.rate.window.seconds`      | Rate limit window in seconds         | `60`                  |
 | `bot.stream.enabled`           | Enable streaming responses           | `true`                |
@@ -209,7 +209,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 
 - API keys and tokens are stored in `.env` (gitignored), never in source code
 - All user input (prompts, usernames) is sanitized against control characters
-- Prompt injection detection blocks known LLM attack patterns (jailbreaks, role overrides, instruction ignoring) in messages, captions, and custom prompts
+- Prompt injection heuristics flag common attack phrasing (jailbreaks, role overrides, instruction ignoring) in English and Russian across messages, captions, and custom prompts — a best-effort speed bump, not a guarantee; the primary control for documents is wrapping their content as untrusted data
 - Document downloads restricted to HTTPS from exact host `api.telegram.org` only
 - Document type, page count, size, and parsing timeout are validated before processing
 - Image downloads restricted to HTTPS from exact host `api.telegram.org` only
@@ -220,7 +220,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - Optional AES-256-GCM encryption for chat messages in DB (protects against DB dump leaks)
 - Production profile can require encryption at startup
 - Automatic cleanup of old chat history (30-day retention)
-- Whitelist support for restricting bot access
+- Whitelist support for restricting bot access — fail-closed (empty whitelist = owner-only, so a misconfigured deploy can't accidentally expose the bot to everyone)
 - Owner-only `/status` command reports runtime health (aggregate, DB, OpenAI) without tokens, keys, or user content
 - Owners are notified when OpenAI quota or rate-limit errors are detected
 - Actuator binds to `127.0.0.1:8081` by default; the `prod` profile exposes only `/actuator/health`

@@ -91,6 +91,24 @@ public class GptService {
     private void init() {
         loadExamples();
         initializeWhitelist();
+        warnIfAccessControlMisconfigured();
+    }
+
+    /**
+     * Access is fail-closed: an empty whitelist means owner-only, not open-to-all.
+     * Surface the resulting posture at startup so a misconfigured deployment is obvious.
+     */
+    private void warnIfAccessControlMisconfigured() {
+        if (!whiteSet.isEmpty()) {
+            return;
+        }
+        if (adminService.getOwnerIds().isEmpty()) {
+            log.error("Access control: both bot.whitelist and bot.owner.ids are empty — the bot will reject ALL users. "
+                    + "Set bot.owner.ids and/or bot.whitelist to grant access.");
+        } else {
+            log.warn("Access control: bot.whitelist is empty — running in owner-only mode. "
+                    + "Add Telegram ids, usernames, or group titles to bot.whitelist to grant access to others.");
+        }
     }
 
     private void loadExamples() {
@@ -863,14 +881,21 @@ public class GptService {
     }
 
     boolean checkPermission(Update update) {
-        if (whiteSet.isEmpty()) {
+        Long fromId = update.message().from().id();
+        // Owner always has access.
+        if (adminService.isOwner(fromId)) {
             return true;
         }
 
-        String userId = String.valueOf(update.message().from().id());
-        if (adminService.isOwner(update.message().from().id())) {
-            return true;
+        // Fail closed: an empty whitelist means owner-only access, not open-to-all.
+        // Without this a deployment that forgets to set bot.whitelist would expose the
+        // bot — and the OpenAI key behind it — to anyone on Telegram, with no global cap.
+        if (whiteSet.isEmpty()) {
+            log.warn("Access denied: whitelist is empty (owner-only mode), user id={} is not an owner", fromId);
+            return false;
         }
+
+        String userId = String.valueOf(fromId);
         String username = update.message().from().username() != null ? update.message().from().username().toLowerCase() : "";
         String groupName = update.message().chat().title() != null ? update.message().chat().title().toLowerCase() : "";
 

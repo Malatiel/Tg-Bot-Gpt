@@ -72,7 +72,9 @@ class GptServiceTest {
         ReflectionTestUtils.setField(gptService, "presentation", "Hello");
         ReflectionTestUtils.setField(gptService, "apiMode", "chat");
         ReflectionTestUtils.setField(gptService, "whiteList", null);
-        ReflectionTestUtils.setField(gptService, "whiteSet", Collections.emptySet());
+        // Access is fail-closed, so the default test user (id 1) is whitelisted; tests that
+        // exercise denial override this with a set that excludes the user.
+        ReflectionTestUtils.setField(gptService, "whiteSet", java.util.Set.of("1"));
         ReflectionTestUtils.setField(gptService, "examples", Collections.emptyList());
 
         // Default: empty history from DB
@@ -776,6 +778,23 @@ class GptServiceTest {
     @Test
     void shouldAllowOwnerEvenWhenWhitelistDoesNotContainOwner() {
         ReflectionTestUtils.setField(gptService, "whiteSet", java.util.Set.of("someoneelse"));
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(adminService.isOwner(1L)).thenReturn(true);
+
+        assertTrue(gptService.checkPermission(update));
+    }
+
+    @Test
+    void shouldDenyWhenWhitelistEmptyAndNotOwner() {
+        ReflectionTestUtils.setField(gptService, "whiteSet", Collections.emptySet());
+        Update update = createPrivateUpdate(1L, "Hello");
+
+        assertFalse(gptService.checkPermission(update));
+    }
+
+    @Test
+    void shouldAllowOwnerWhenWhitelistEmpty() {
+        ReflectionTestUtils.setField(gptService, "whiteSet", Collections.emptySet());
         Update update = createPrivateUpdate(1L, "Hello");
         when(adminService.isOwner(1L)).thenReturn(true);
 

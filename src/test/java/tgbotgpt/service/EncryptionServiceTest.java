@@ -146,6 +146,27 @@ class EncryptionServiceTest {
     }
 
     @Test
+    void shouldThrowOnEncryptFailureWhenRequired() {
+        EncryptionService service = new EncryptionService();
+        // Enabled but with a null key forces cipher init to fail during encrypt().
+        ReflectionTestUtils.setField(service, "enabled", true);
+        ReflectionTestUtils.setField(service, "encryptionRequired", true);
+        ReflectionTestUtils.setField(service, "secretKey", null);
+
+        assertThrows(IllegalStateException.class, () -> service.encrypt("sensitive"));
+    }
+
+    @Test
+    void shouldFallbackToPlaintextOnEncryptFailureWhenNotRequired() {
+        EncryptionService service = new EncryptionService();
+        ReflectionTestUtils.setField(service, "enabled", true);
+        ReflectionTestUtils.setField(service, "encryptionRequired", false);
+        ReflectionTestUtils.setField(service, "secretKey", null);
+
+        assertEquals("sensitive", service.encrypt("sensitive"));
+    }
+
+    @Test
     void shouldReturnPlaintextForLegacyUnencryptedData() {
         EncryptionService service = createEnabled();
 

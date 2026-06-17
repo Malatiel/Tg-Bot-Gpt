@@ -15,7 +15,7 @@ development see [README.md](README.md).
 | `SPRING_DATASOURCE_PASSWORD` | yes                |                                                                      |
 | `ENCRYPTION_KEY`             | yes (in prod)      | base64-encoded 32-byte AES key. See "Encryption" below               |
 | `ENCRYPTION_REQUIRED`        | optional (`true`)  | `true` in prod by default — startup fails if key missing/invalid     |
-| `BOT_OWNER_IDS`              | recommended        | Comma-separated Telegram user IDs allowed to run `/status`           |
+| `BOT_OWNER_IDS`              | yes (in practice)  | Comma-separated Telegram owner IDs. Owners run `/status` and `/admin`, and — since access is fail-closed — with an empty `BOT_WHITELIST` they are the only ones who can use the bot. If both are empty the bot rejects everyone. |
 | `OPENAI_API_MODE`            | optional           | `responses` (default) or `chat`                                      |
 | `OPENAI_MODEL`               | optional           | Default model; `gpt-5.4-nano` by default for lowest GPT-5.4 cost     |
 | `OPENAI_ALLOWED_MODELS`      | optional           | Comma-separated models users can choose with `/model` buttons        |
@@ -27,7 +27,7 @@ development see [README.md](README.md).
 | `BILLING_PRO_MONTHLY_MESSAGES` | optional         | Pro-plan monthly message limit                                       |
 | `BILLING_PRO_DEFAULT_DAYS`  | optional           | Default Pro duration for owner approvals, `30` by default            |
 | `BILLING_EXPIRATION_CLEANUP_CRON` | optional     | Cron for automatic expired-Pro cleanup                               |
-| `BOT_WHITELIST`              | optional           | Comma-separated user IDs/usernames/group names; empty = open access  |
+| `BOT_WHITELIST`              | optional           | Comma-separated user IDs/usernames/group names; empty = owner-only (fail-closed) |
 
 ## Profiles
 
