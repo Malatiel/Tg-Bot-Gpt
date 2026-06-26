@@ -601,11 +601,35 @@ public class GptService {
                 Current plan: %s
                 """.formatted(userId, status.plan().toUpperCase(Locale.ROOT)).strip();
         String ownerMessage = """
-                Upgrade request from Telegram user %d.
+                Pro upgrade request
+                User: %d
                 Current plan: %s
+                Plan expires: %s
+                This month: %d/%s tokens (%s remaining), %d/%s messages (%s remaining)
+                Lifetime: %d tokens, %d messages
+
+                Actions:
                 Review: /admin usage %d
-                Approve Pro: /admin approve %d 30d
-                """.formatted(userId, status.plan().toUpperCase(Locale.ROOT), userId, userId).strip();
+                Approve 7d: /admin approve %d 7d
+                Approve 30d: /admin approve %d 30d
+                Keep Free: /admin downgrade %d
+                """.formatted(
+                userId,
+                status.plan().toUpperCase(Locale.ROOT),
+                formatPlanExpiry(status.plan(), status.planExpiresAt()),
+                status.periodTokensUsed(),
+                formatLimit(status.tokenLimit()),
+                formatRemaining(status.remainingTokens()),
+                status.periodMessages(),
+                formatLimit(status.messageLimit()),
+                formatRemaining(status.remainingMessages()),
+                status.totalTokensUsed(),
+                status.totalMessages(),
+                userId,
+                userId,
+                userId,
+                userId
+        ).strip();
         return new UpgradeRequest(userMessage, ownerMessage, true);
     }
 
@@ -618,8 +642,8 @@ public class GptService {
                 /admin status
                 /admin users
                 /admin usage <telegram_id>
+                /admin approve <telegram_id> [days]
                 /admin plan <telegram_id> <free|pro|owner> [days]
-                /admin approve <telegram_id> <days>
                 /admin extend <telegram_id> <days>
                 /admin downgrade <telegram_id>
                 """.strip();
@@ -634,15 +658,21 @@ public class GptService {
             return "No users yet.";
         }
         return users.stream()
-                .map(user -> "%d%s - %s, expires %s, %s, %d tokens, %d messages".formatted(
+                .map(user -> """
+                        %d%s - %s, expires %s, period %s
+                        usage %d/%s tokens, %d/%s messages; actions: %s
+                        """.formatted(
                         user.telegramId(),
                         formatUsername(user.username()),
                         user.plan().toUpperCase(Locale.ROOT),
                         formatPlanExpiry(user.plan(), user.planExpiresAt()),
                         user.period(),
                         user.periodTokensUsed(),
-                        user.periodMessages()
-                ))
+                        formatLimit(userSettings.getMonthlyTokenLimit(user.plan())),
+                        user.periodMessages(),
+                        formatLimit(userSettings.getMonthlyMessageLimit(user.plan())),
+                        adminUserActions(user.telegramId(), user.plan())
+                ).strip())
                 .collect(Collectors.joining("\n", "Recent users\n", ""));
     }
 
@@ -663,6 +693,18 @@ public class GptService {
             return "";
         }
         return " @" + username;
+    }
+
+    private String adminUserActions(Long telegramId, String plan) {
+        String normalizedPlan = plan == null ? "" : plan.toLowerCase(Locale.ROOT);
+        if ("pro".equals(normalizedPlan)) {
+            return "/admin usage %d | /admin extend %d 30d | /admin downgrade %d"
+                    .formatted(telegramId, telegramId, telegramId);
+        }
+        if ("owner".equals(normalizedPlan)) {
+            return "/admin usage %d".formatted(telegramId);
+        }
+        return "/admin usage %d | /admin approve %d 30d".formatted(telegramId, telegramId);
     }
 
     private String planChangedMessage(Long targetUserId) {

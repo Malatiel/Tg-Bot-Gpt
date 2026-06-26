@@ -15,7 +15,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **Local onboarding/help** — `/start` and `/help` explain core workflows without spending OpenAI tokens
 - **Prompt examples** — `/examples` gives Telegram-ready prompts for chat, documents, images, custom prompts, and limits
 - **Billing-ready usage limits** — free/pro/owner plans with monthly token/message limits
-- **Plan UX** — users can view plans and request Pro; owners manage plans via `/admin`
+- **Plan UX** — users can view plans and request Pro; owners get usage-aware approval commands via `/admin`
 - **Rate limiting** — configurable per-user request limit (sliding window)
 - **Message encryption** — AES-256-GCM encryption for chat messages in DB (optional)
 - **Auto-cleanup** — old messages purged from DB after 30 days

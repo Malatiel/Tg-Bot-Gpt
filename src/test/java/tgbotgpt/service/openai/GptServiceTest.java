@@ -643,28 +643,58 @@ class GptServiceTest {
     @Test
     void shouldCreateUpgradeRequestForFreeUser() {
         when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
-                "free", "2026-04", 0, 0, 0, 0, 50000, 100, null
+                "free", "2026-04", 1234, 12, 100, 2, 50000, 100, null
         ));
 
         GptService.UpgradeRequest request = gptService.createUpgradeRequest(1L);
 
         assertTrue(request.notifyOwners());
         assertTrue(request.userMessage().contains("Upgrade request sent."));
+        assertTrue(request.ownerMessage().contains("Pro upgrade request"));
+        assertTrue(request.ownerMessage().contains("This month: 100/50000 tokens (49900 remaining), 2/100 messages (98 remaining)"));
+        assertTrue(request.ownerMessage().contains("Lifetime: 1234 tokens, 12 messages"));
+        assertTrue(request.ownerMessage().contains("/admin usage 1"));
+        assertTrue(request.ownerMessage().contains("/admin approve 1 7d"));
         assertTrue(request.ownerMessage().contains("/admin approve 1 30d"));
+        assertTrue(request.ownerMessage().contains("/admin downgrade 1"));
     }
 
     @Test
     void shouldBuildAdminUsersSummaryForOwner() {
         when(adminService.isOwner(99L)).thenReturn(true);
-        when(userSettings.getRecentUsers(10)).thenReturn(List.of(new UserSettingsService.AdminUserSummary(
-                1L, "alice", "pro", LocalDateTime.of(2026, 5, 30, 12, 0),
-                "2026-04", 100, 2, 1000, 20
-        )));
+        when(userSettings.getMonthlyTokenLimit("pro")).thenReturn(1000000);
+        when(userSettings.getMonthlyMessageLimit("pro")).thenReturn(2000);
+        when(userSettings.getMonthlyTokenLimit("free")).thenReturn(50000);
+        when(userSettings.getMonthlyMessageLimit("free")).thenReturn(100);
+        when(userSettings.getMonthlyTokenLimit("owner")).thenReturn(-1);
+        when(userSettings.getMonthlyMessageLimit("owner")).thenReturn(-1);
+        when(userSettings.getRecentUsers(10)).thenReturn(List.of(
+                new UserSettingsService.AdminUserSummary(
+                        1L, "alice", "pro", LocalDateTime.of(2026, 5, 30, 12, 0),
+                        "2026-04", 100, 2, 1000, 20
+                ),
+                new UserSettingsService.AdminUserSummary(
+                        2L, "bob", "free", null,
+                        "2026-04", 200, 3, 500, 10
+                ),
+                new UserSettingsService.AdminUserSummary(
+                        3L, "owner", "owner", null,
+                        "2026-04", 300, 4, 600, 11
+                )
+        ));
 
         String result = gptService.getAdminUsersSummary(99L);
 
         assertTrue(result.contains("Recent users"));
         assertTrue(result.contains("1 @alice - PRO"));
+        assertTrue(result.contains("usage 100/1000000 tokens, 2/2000 messages"));
+        assertTrue(result.contains("/admin usage 1 | /admin extend 1 30d | /admin downgrade 1"));
+        assertTrue(result.contains("2 @bob - FREE"));
+        assertTrue(result.contains("usage 200/50000 tokens, 3/100 messages"));
+        assertTrue(result.contains("/admin usage 2 | /admin approve 2 30d"));
+        assertTrue(result.contains("3 @owner - OWNER"));
+        assertTrue(result.contains("usage 300/unlimited tokens, 4/unlimited messages"));
+        assertTrue(result.contains("actions: /admin usage 3"));
     }
 
     @Test

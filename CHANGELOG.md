@@ -5,6 +5,8 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-26 — Product onboarding and Pro admin UX
+
 ### Added
 - Product strategy document covering positioning, target users, roadmap,
   metrics, and risks.
@@ -18,6 +20,10 @@ All notable changes are documented here. The format follows
 - `/start` now returns a deterministic local onboarding message instead of
   calling OpenAI, so first-run guidance works during API/quota incidents and
   does not spend tokens.
+- Pro upgrade owner notifications now include current usage, remaining limits,
+  expiry, review, approve, and keep-free commands.
+- `/admin users` now shows usage limits and quick plan-management actions for
+  each recent user.
 
 ## [0.6.1] — 2026-06-26 — Access control and OpenAI compatibility
 

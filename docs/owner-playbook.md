@@ -50,7 +50,8 @@ User flow:
 /upgrade
 ```
 
-Owner receives a message with review and approval commands.
+Owner receives a message with current plan, expiry, monthly usage, remaining
+limits, lifetime usage, and ready-to-send commands.
 
 Review:
 
@@ -84,6 +85,9 @@ Downgrade back to Free:
 
 Use explicit durations for paid or trial access. Avoid indefinite Pro unless the
 user is an operator or trusted internal account.
+
+The owner notification includes a "Keep Free" downgrade command even for Free
+users. It is a no-op confirmation path for manual review, not a rejection record.
 
 ## Plan Operations
 
@@ -125,6 +129,12 @@ Look for:
 - expired or soon-to-expire Pro access;
 - unusually high token usage;
 - users asking for repeated manual support.
+
+`/admin users` includes quick actions next to each recent user:
+
+- Free users: review usage or approve 30 days of Pro.
+- Pro users: review usage, extend 30 days, or downgrade.
+- Owner users: review usage.
 
 If usage grows, decide whether you need separate policies for documents and
 images before raising limits.
