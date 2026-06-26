@@ -52,6 +52,8 @@ public class GptService {
     private Integer maxtokens;
     @Value("${openai.temperature}")
     private Double temperature;
+    @Value("${openai.temperature.unsupported.models:}")
+    private String temperatureUnsupportedModelsRaw;
     @Value("${openai.systemprompt}")
     private String defaultSystemPrompt;
     @Value("${openai.max.message.pool.size}")
@@ -67,6 +69,7 @@ public class GptService {
 
     private Set<String> whiteSet;
     private List<String> examples;
+    private List<String> temperatureUnsupportedModels = Collections.emptyList();
     private final AtomicInteger ntokens = new AtomicInteger(0);
 
     public GptService(OpenAIApiClient client, OpenAIResponsesApiClient responsesClient, Environment env, RateLimiter rateLimiter,
@@ -92,6 +95,30 @@ public class GptService {
         loadExamples();
         initializeWhitelist();
         warnIfAccessControlMisconfigured();
+        initializeTemperatureOverrides();
+    }
+
+    private void initializeTemperatureOverrides() {
+        temperatureUnsupportedModels = Arrays.stream(temperatureUnsupportedModelsRaw.split(","))
+                .map(String::trim)
+                .filter(prefix -> !prefix.isEmpty())
+                .toList();
+    }
+
+    /**
+     * Some OpenAI models reject a custom temperature (they only accept the default).
+     * Returns null — which both clients omit from the request body — for any model whose
+     * name starts with a configured unsupported prefix; otherwise the configured value.
+     */
+    private Double temperatureFor(String model) {
+        if (model != null) {
+            for (String prefix : temperatureUnsupportedModels) {
+                if (model.startsWith(prefix)) {
+                    return null;
+                }
+            }
+        }
+        return temperature;
     }
 
     /**
@@ -236,7 +263,7 @@ public class GptService {
 
             ChatRequest chatRequest = new ChatRequest();
             chatRequest.setModel(userModel);
-            chatRequest.setTemperature(temperature);
+            chatRequest.setTemperature(temperatureFor(chatRequest.getModel()));
             chatRequest.setMaxTokens(maxtokens);
             chatRequest.setMessages(List.of(createSystemMessage(systemPrompt), visionMsg));
 
@@ -328,7 +355,7 @@ public class GptService {
 
             ChatRequest chatRequest = new ChatRequest();
             chatRequest.setModel(userModel);
-            chatRequest.setTemperature(temperature);
+            chatRequest.setTemperature(temperatureFor(chatRequest.getModel()));
             chatRequest.setMaxTokens(maxtokens);
 
             Message userMsg = new Message();
@@ -682,7 +709,7 @@ public class GptService {
 
         ChatRequest chatRequest = new ChatRequest();
         chatRequest.setModel(userModel);
-        chatRequest.setTemperature(temperature);
+        chatRequest.setTemperature(temperatureFor(chatRequest.getModel()));
         chatRequest.setMaxTokens(maxtokens);
 
         List<Message> messages = new ArrayList<>();
@@ -719,7 +746,7 @@ public class GptService {
     private ChatRequest createCustomChatRequest(String text) {
         ChatRequest chatRequest = new ChatRequest();
         chatRequest.setModel(userSettings.getDefaultModel());
-        chatRequest.setTemperature(temperature);
+        chatRequest.setTemperature(temperatureFor(chatRequest.getModel()));
         chatRequest.setMaxTokens(maxtokens);
 
         Message userMessage = new Message();
@@ -881,29 +908,48 @@ public class GptService {
     }
 
     boolean checkPermission(Update update) {
-        Long fromId = update.message().from().id();
-        // Owner always has access.
-        if (adminService.isOwner(fromId)) {
+        com.pengrad.telegrambot.model.Message message = update.message();
+        com.pengrad.telegrambot.model.User from = message != null ? message.from() : null;
+        com.pengrad.telegrambot.model.Chat chat = message != null ? message.chat() : null;
+        Long fromId = from != null ? from.id() : null;
+        if (fromId == null) {
+            return false;
+        }
+        return isAllowed(
+                fromId,
+                from.username(),
+                chat != null ? chat.title() : null);
+    }
+
+    /**
+     * Fail-closed access check usable for both messages and callbacks (callbacks have no
+     * {@code message().from()}). Owner always passes; an empty whitelist means owner-only,
+     * never open-to-all — so a deployment that forgets to set bot.whitelist can't expose
+     * the bot (and the OpenAI key behind it) to anyone on Telegram with no global cap.
+     */
+    public boolean isAllowed(Long fromId, String username, String chatTitle) {
+        if (fromId == null) {
+            log.warn("Access denied: Telegram sender id is missing");
+            return false;
+        }
+        if (fromId != null && adminService.isOwner(fromId)) {
             return true;
         }
 
-        // Fail closed: an empty whitelist means owner-only access, not open-to-all.
-        // Without this a deployment that forgets to set bot.whitelist would expose the
-        // bot — and the OpenAI key behind it — to anyone on Telegram, with no global cap.
         if (whiteSet.isEmpty()) {
             log.warn("Access denied: whitelist is empty (owner-only mode), user id={} is not an owner", fromId);
             return false;
         }
 
         String userId = String.valueOf(fromId);
-        String username = update.message().from().username() != null ? update.message().from().username().toLowerCase() : "";
-        String groupName = update.message().chat().title() != null ? update.message().chat().title().toLowerCase() : "";
+        String user = username != null ? username.toLowerCase() : "";
+        String groupName = chatTitle != null ? chatTitle.toLowerCase() : "";
 
-        if (whiteSet.contains(userId) || whiteSet.contains(username) || whiteSet.contains(groupName)) {
+        if (whiteSet.contains(userId) || whiteSet.contains(user) || whiteSet.contains(groupName)) {
             return true;
         }
 
-        log.warn("Unauthorized user id={}", userId);
+        log.warn("Unauthorized user id={}", fromId);
         return false;
     }
 

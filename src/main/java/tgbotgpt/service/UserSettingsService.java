@@ -3,6 +3,7 @@ package tgbotgpt.service;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,7 +13,6 @@ import tgbotgpt.repository.BotUserRepository;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -209,8 +209,10 @@ public class UserSettingsService {
     @Transactional
     public UsageStatus getUsageStatus(Long userId, boolean owner) {
         BotUser user = getOrCreateUser(userId, null, null);
+        // No explicit save: getOrCreateUser already persisted the row, and any period
+        // rollover mutation here is flushed by @Transactional dirty checking on commit —
+        // so a plain read (no rollover) issues no extra UPDATE.
         ensureCurrentBillingPeriod(user);
-        userRepository.save(user);
         String plan = effectivePlan(user, owner);
         return new UsageStatus(
                 plan,
@@ -321,13 +323,8 @@ public class UserSettingsService {
 
     public List<AdminUserSummary> getRecentUsers(int limit) {
         int actualLimit = Math.max(1, limit);
-        Comparator<BotUser> byLastActive = Comparator.comparing(
-                BotUser::getLastActive,
-                Comparator.nullsLast(Comparator.naturalOrder())
-        );
-        return userRepository.findAll().stream()
-                .sorted(byLastActive.reversed())
-                .limit(actualLimit)
+        // Order + limit in the database instead of loading the whole table into memory.
+        return userRepository.findAllByOrderByLastActiveDesc(PageRequest.of(0, actualLimit)).stream()
                 .map(user -> new AdminUserSummary(
                         user.getTelegramId(),
                         user.getUsername(),

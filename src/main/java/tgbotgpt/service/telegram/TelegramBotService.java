@@ -52,6 +52,7 @@ import org.slf4j.MDC;
 public class TelegramBotService {
 
     private static final int STREAM_UPDATE_INTERVAL_MS = 800;
+    private static final String ACCESS_DENIED_MESSAGE = "Sorry, you are not in the access list.";
 
     private final GptService gptService;
     private final ImageService imageService;
@@ -154,6 +155,9 @@ public class TelegramBotService {
         try {
             processUpdateInternal(update);
             success = true;
+        } catch (RuntimeException e) {
+            log.error("Unhandled Telegram update processing failure for update {}",
+                    update != null ? update.updateId() : null, e);
         } finally {
             Duration duration = Duration.between(startedAt, Instant.now());
             metrics.recordOperationDuration(operation, success, duration);
@@ -173,7 +177,7 @@ public class TelegramBotService {
         // Handle documents
         if (update.message().document() != null) {
             if (UpdateUtils.isPrivate(update) || hasBotMention(update)) {
-                processDocument(update);
+                if (ensureAllowed(update)) processDocument(update);
             }
             return;
         }
@@ -181,7 +185,7 @@ public class TelegramBotService {
         // Handle photos
         if (update.message().photo() != null && update.message().photo().length > 0) {
             if (UpdateUtils.isPrivate(update) || hasBotMention(update)) {
-                processPhoto(update);
+                if (ensureAllowed(update)) processPhoto(update);
             }
             return;
         }
@@ -189,13 +193,46 @@ public class TelegramBotService {
         // Handle text
         if (update.message().text() != null) {
             if (update.message().text().startsWith("/")) {
-                processCommand(update);
+                if (ensureAllowed(update)) processCommand(update);
             } else {
                 if (UpdateUtils.isPrivate(update) || hasBotMention(update)) {
-                    processText(update);
+                    if (ensureAllowed(update)) processText(update);
                 }
             }
         }
+    }
+
+    /**
+     * Fail-closed gate for any message interaction. Runs before we touch user state,
+     * download files, or call the model, so unauthorized users never create DB rows,
+     * leak plan/usage info, or cost us a Telegram file download.
+     */
+    private boolean ensureAllowed(Update update) {
+        Message message = update != null ? update.message() : null;
+        User from = message != null ? message.from() : null;
+        Chat chat = message != null ? message.chat() : null;
+        Long fromId = from != null ? from.id() : null;
+        String username = from != null ? from.username() : null;
+        String chatTitle = chat != null ? chat.title() : null;
+
+        if (gptService.isAllowed(fromId, username, chatTitle)) {
+            return true;
+        }
+        if (chat != null) {
+            sendReply(update, ACCESS_DENIED_MESSAGE);
+        } else {
+            log.warn("Access denied for update without reply chat");
+        }
+        return false;
+    }
+
+    private boolean isCallbackAllowed(CallbackQuery callback) {
+        Long fromId = callback.from() != null ? callback.from().id() : null;
+        String username = callback.from() != null ? callback.from().username() : null;
+        String chatTitle = callback.message() != null && callback.message().chat() != null
+                ? callback.message().chat().title()
+                : null;
+        return gptService.isAllowed(fromId, username, chatTitle);
     }
 
     private boolean hasBotMention(Update update) {
@@ -522,6 +559,11 @@ public class TelegramBotService {
     }
 
     private void processCallback(CallbackQuery callback) {
+        if (!isCallbackAllowed(callback)) {
+            bot.execute(new AnswerCallbackQuery(callback.id()).text(ACCESS_DENIED_MESSAGE));
+            return;
+        }
+
         String data = callback.data();
         if (data == null) {
             bot.execute(new AnswerCallbackQuery(callback.id()).text("Unsupported action"));

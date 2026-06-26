@@ -20,6 +20,7 @@ development see [README.md](README.md).
 | `OPENAI_MODEL`               | optional           | Default model; `gpt-5.4-nano` by default for lowest GPT-5.4 cost     |
 | `OPENAI_ALLOWED_MODELS`      | optional           | Comma-separated models users can choose with `/model` buttons        |
 | `OPENAI_MAX_HISTORY_TOKENS`  | optional           | Approximate context budget for DB history, default `2000`            |
+| `OPENAI_TEMPERATURE_UNSUPPORTED_MODELS` | optional | Comma-separated model-name prefixes that reject a custom temperature; it is omitted for them (avoids 400s). Empty by default |
 | `BILLING_DEFAULT_PLAN`       | optional           | Plan for new users: `free` by default                                |
 | `BILLING_FREE_MONTHLY_TOKENS` | optional          | Free-plan monthly token limit                                        |
 | `BILLING_FREE_MONTHLY_MESSAGES` | optional        | Free-plan monthly message limit                                      |

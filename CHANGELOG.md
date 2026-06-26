@@ -5,14 +5,22 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-06-26 — Access control and OpenAI compatibility
+
 ### Changed
 - **Access control is now fail-closed**: an empty `bot.whitelist` means owner-only
   access instead of open-to-all, so a deployment that forgets to configure a
   whitelist no longer exposes the bot (and the OpenAI key behind it) to everyone.
   A startup warning is logged when the whitelist is empty, and an error when both
   the whitelist and `bot.owner.ids` are empty (the bot then rejects all users).
-- `pom.xml` version aligned with the changelog (`0.6.0`); it had lagged at `0.3.0`
-  and surfaced the wrong version via `/actuator/info` and `/status`.
+- `pom.xml` version aligned with the changelog (`0.6.1`) so `/actuator/info`,
+  `/status`, and release artifacts surface the intended version.
+- Telegram update handling now records failed operations instead of letting
+  unexpected runtime exceptions escape worker tasks.
+- OpenAI requests can omit `temperature` for configured model prefixes that reject
+  custom temperature values.
+- `/admin users` now uses database ordering and limiting instead of loading all
+  users before sorting.
 
 ### Security
 - Encryption no longer silently falls back to storing plaintext when
@@ -20,6 +28,8 @@ All notable changes are documented here. The format follows
   operation instead.
 - Prompt injection heuristics now also cover common Russian-language override and
   jailbreak phrasing (the bot is primarily Russian-speaking).
+- Message and callback access checks now run before command handling, media
+  downloads, user-state creation, or OpenAI calls.
 
 ## [0.6.0] — 2026-05-04 — Expiring subscriptions
 

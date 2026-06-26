@@ -275,6 +275,37 @@ class GptServiceTest {
     }
 
     @Test
+    void shouldOmitTemperatureForUnsupportedModel() {
+        ReflectionTestUtils.setField(gptService, "temperatureUnsupportedModels", java.util.List.of("gpt-5.4"));
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-5.4-nano");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("Hello")).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("Hi")));
+
+        gptService.sendMessage(update);
+
+        verify(client).getCompletion(argThat(req -> req.getTemperature() == null && "gpt-5.4-nano".equals(req.getModel())));
+    }
+
+    @Test
+    void shouldKeepTemperatureForSupportedModel() {
+        Update update = createPrivateUpdate(1L, "Hello");
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-4o-mini");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection("Hello")).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("Hi")));
+
+        gptService.sendMessage(update);
+
+        verify(client).getCompletion(argThat(req -> Double.valueOf(0.7).equals(req.getTemperature())));
+    }
+
+    @Test
     void shouldUsePerUserModel() {
         Update update = createPrivateUpdate(1L, "Hello");
         when(rateLimiter.isAllowed(1L)).thenReturn(true);
