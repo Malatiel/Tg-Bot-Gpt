@@ -53,6 +53,32 @@ public class TelegramBotService {
 
     private static final int STREAM_UPDATE_INTERVAL_MS = 800;
     private static final String ACCESS_DENIED_MESSAGE = "Sorry, you are not in the access list.";
+    private static final String WELCOME_MESSAGE = """
+            Hello! I am GPTbot in Telegram.
+
+            I can answer questions, keep recent private-chat context, analyze photos, and read PDF/TXT documents.
+
+            Send a message to start. Use /help for commands, /settings for model and limits, or /plan to request Pro.
+            """;
+    private static final String HELP_MESSAGE = """
+            GPTbot help
+
+            Main workflows:
+            - Send a message to chat with GPT.
+            - Send a photo for image analysis.
+            - Send a PDF or TXT file for document analysis.
+            - Mention @%s in a group chat to ask the bot.
+
+            Commands:
+            /settings - model, prompt, usage, and limits
+            /model - choose a model
+            /prompt <text> - set a custom system prompt
+            /prompt reset - reset your prompt
+            /balance - current plan and remaining limits
+            /plan - available plans and Pro request
+            /upgrade - request Pro from the owner
+            /reset - clear private-chat history
+            """;
 
     private final GptService gptService;
     private final ImageService imageService;
@@ -64,8 +90,6 @@ public class TelegramBotService {
     private String botToken;
     @Value("${bot.name}")
     private String botName;
-    @Value("${bot.presentation}")
-    private String presentationText;
     @Value("${bot.stream.enabled:true}")
     private boolean streamEnabled;
     @Value("${bot.executor.threads:0}")
@@ -504,6 +528,10 @@ public class TelegramBotService {
             handleUpgradeCommand(update);
             return;
         }
+        if (text.startsWith("/help")) {
+            sendHelp(update);
+            return;
+        }
         if (text.startsWith("/admin")) {
             handleAdminCommand(update);
             return;
@@ -511,7 +539,7 @@ public class TelegramBotService {
 
         switch (text) {
             case "/start":
-                presentation(update);
+                sendWelcome(update);
                 break;
             case "/usage":
                 printUsage(update);
@@ -796,9 +824,12 @@ public class TelegramBotService {
         }
     }
 
-    private void presentation(Update update) {
-        String response = gptService.sendCustomMessage(update, presentationText);
-        sendReply(update, response);
+    private void sendWelcome(Update update) {
+        sendReply(update, WELCOME_MESSAGE.strip());
+    }
+
+    private void sendHelp(Update update) {
+        sendReply(update, HELP_MESSAGE.formatted(botName).strip());
     }
 
     private void printUsage(Update update) {

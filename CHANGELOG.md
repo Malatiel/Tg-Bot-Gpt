@@ -5,6 +5,16 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Product strategy document covering positioning, target users, roadmap,
+  metrics, and risks.
+- `/help` command with a compact map of the bot's main workflows and commands.
+
+### Changed
+- `/start` now returns a deterministic local onboarding message instead of
+  calling OpenAI, so first-run guidance works during API/quota incidents and
+  does not spend tokens.
+
 ## [0.6.1] — 2026-06-26 — Access control and OpenAI compatibility
 
 ### Changed

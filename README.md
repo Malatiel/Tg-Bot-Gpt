@@ -12,6 +12,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **Streaming responses** — bot edits its message in real-time as tokens arrive
 - **Per-user model selection** — each user can switch GPT models via `/model` buttons
 - **Settings overview** — `/settings` shows model, prompt summary, usage, and limits
+- **Local onboarding/help** — `/start` and `/help` explain core workflows without spending OpenAI tokens
 - **Billing-ready usage limits** — free/pro/owner plans with monthly token/message limits
 - **Plan UX** — users can view plans and request Pro; owners manage plans via `/admin`
 - **Rate limiting** — configurable per-user request limit (sliding window)
@@ -28,6 +29,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 | Command            | Description                              |
 |--------------------|------------------------------------------|
 | `/start`           | Bot introduction                         |
+| `/help`            | Show main workflows and commands         |
 | `/usage`           | Show your balance and usage stats        |
 | `/balance`         | Show current plan, monthly usage and remaining limits |
 | `/plan`, `/plans`  | Show available plans and Pro request button |

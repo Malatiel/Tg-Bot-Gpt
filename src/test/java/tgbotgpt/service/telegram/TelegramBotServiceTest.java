@@ -275,6 +275,50 @@ class TelegramBotServiceTest {
     }
 
     @Test
+    void startCommandSendsLocalWelcomeWithoutCallingOpenAi() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        when(gptService.isAllowed(anyLong(), any(), any())).thenReturn(true);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/start"));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot).execute(captor.capture());
+        String text = (String) captor.getValue().getParameters().get("text");
+        assertTrue(text.contains("Hello! I am GPTbot in Telegram."));
+        assertTrue(text.contains("/help"));
+        verify(gptService, never()).sendCustomMessage(any(), any());
+    }
+
+    @Test
+    void helpCommandSendsLocalCommandMap() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        when(gptService.isAllowed(anyLong(), any(), any())).thenReturn(true);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+        ReflectionTestUtils.setField(service, "botName", "IndividualBotJava");
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/help"));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot).execute(captor.capture());
+        String text = (String) captor.getValue().getParameters().get("text");
+        assertTrue(text.contains("GPTbot help"));
+        assertTrue(text.contains("Mention @IndividualBotJava"));
+        assertTrue(text.contains("/settings"));
+        assertTrue(text.contains("/upgrade"));
+    }
+
+    @Test
     void adminPlanCommandDelegatesToGptService() {
         TelegramBot bot = mock(TelegramBot.class);
         GptService gptService = mock(GptService.class);
