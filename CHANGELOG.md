@@ -8,7 +8,11 @@ All notable changes are documented here. The format follows
 ### Added
 - Product strategy document covering positioning, target users, roadmap,
   metrics, and risks.
+- User and owner playbooks with practical usage examples, manual Pro operations,
+  access-control guidance, and incident-response checklists.
 - `/help` command with a compact map of the bot's main workflows and commands.
+- `/examples` command with Telegram-ready prompts for chat, documents, images,
+  custom prompts, and limits.
 
 ### Changed
 - `/start` now returns a deterministic local onboarding message instead of

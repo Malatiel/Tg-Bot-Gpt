@@ -70,6 +70,7 @@ public class TelegramBotService {
             - Mention @%s in a group chat to ask the bot.
 
             Commands:
+            /examples - practical prompt examples
             /settings - model, prompt, usage, and limits
             /model - choose a model
             /prompt <text> - set a custom system prompt
@@ -78,6 +79,26 @@ public class TelegramBotService {
             /plan - available plans and Pro request
             /upgrade - request Pro from the owner
             /reset - clear private-chat history
+            """;
+    private static final String EXAMPLES_MESSAGE = """
+            GPTbot examples
+
+            Chat:
+            Goal: choose the best deployment option.
+            Context: small Telegram bot, one maintainer, PostgreSQL, Docker Compose.
+            Output: compare 3 options and recommend one.
+
+            Document caption:
+            Summarize key decisions, risks, owners, and deadlines. If an owner is missing, write "unassigned".
+
+            Image caption:
+            Review this screenshot and suggest what I should click or check next.
+
+            Custom prompt:
+            /prompt Answer in Russian unless I ask otherwise. Be concise, practical, and challenge weak assumptions.
+
+            Limits:
+            Use /settings for model and prompt, /balance for remaining quota, and /plan or /upgrade for Pro.
             """;
 
     private final GptService gptService;
@@ -532,6 +553,10 @@ public class TelegramBotService {
             sendHelp(update);
             return;
         }
+        if (text.startsWith("/examples")) {
+            sendExamples(update);
+            return;
+        }
         if (text.startsWith("/admin")) {
             handleAdminCommand(update);
             return;
@@ -830,6 +855,10 @@ public class TelegramBotService {
 
     private void sendHelp(Update update) {
         sendReply(update, HELP_MESSAGE.formatted(botName).strip());
+    }
+
+    private void sendExamples(Update update) {
+        sendReply(update, EXAMPLES_MESSAGE.strip());
     }
 
     private void printUsage(Update update) {
