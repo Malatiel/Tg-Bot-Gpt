@@ -5,6 +5,22 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-01 — Telegram Stars payments
+
+### Added
+- Telegram Stars native payment flow for Pro purchases directly inside
+  Telegram with XTR-denominated invoices.
+- Pre-checkout validation for Stars payments before Telegram confirms the
+  invoice.
+- Automatic Pro activation after successful Stars payment confirmation.
+- Stored Telegram charge IDs for paid Pro purchases to prevent duplicate
+  payment processing.
+
+### Changed
+- `/upgrade` now starts the Stars invoice flow and falls back to the manual
+  owner-approval request when an invoice cannot be sent.
+- The plan menu now offers both Stars purchase and manual Pro request paths.
+
 ## [0.7.0] — 2026-06-26 — Product onboarding and Pro admin UX
 
 ### Added
