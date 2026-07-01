@@ -198,6 +198,21 @@ public class UserSettingsService {
     }
 
     @Transactional
+    public boolean activatePaidProPlan(Long userId, int days) {
+        if (days <= 0) {
+            return false;
+        }
+        BotUser user = getOrCreateUser(userId, null, null);
+        ensureCurrentBillingPeriod(user);
+        if ("owner".equals(user.getBillingPlan())) {
+            return true;
+        }
+        applyBillingPlan(user, "pro", days, "pro".equals(user.getBillingPlan()));
+        userRepository.save(user);
+        return true;
+    }
+
+    @Transactional
     public boolean downgradeToFree(Long userId) {
         BotUser user = getOrCreateUser(userId, null, null);
         ensureCurrentBillingPeriod(user);

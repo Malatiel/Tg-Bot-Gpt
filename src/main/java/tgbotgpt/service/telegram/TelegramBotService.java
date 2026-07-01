@@ -8,6 +8,7 @@ import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
 import com.pengrad.telegrambot.model.request.ParseMode;
 import com.pengrad.telegrambot.model.request.ReplyKeyboardRemove;
 import com.pengrad.telegrambot.request.AnswerCallbackQuery;
+import com.pengrad.telegrambot.request.AnswerPreCheckoutQuery;
 import com.pengrad.telegrambot.request.BaseRequest;
 import com.pengrad.telegrambot.request.EditMessageText;
 import com.pengrad.telegrambot.request.GetFile;
@@ -27,6 +28,7 @@ import tgbotgpt.service.DocumentExtractionResult;
 import tgbotgpt.service.DocumentService;
 import tgbotgpt.service.ImageService;
 import tgbotgpt.service.ImageDownloadResult;
+import tgbotgpt.service.StarsPaymentService;
 import tgbotgpt.service.openai.GptService;
 import tgbotgpt.utils.LogUtils;
 import tgbotgpt.utils.TelegramUtils;
@@ -35,6 +37,7 @@ import tgbotgpt.utils.UpdateUtils;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -106,6 +109,7 @@ public class TelegramBotService {
     private final DocumentService documentService;
     private final BotAdminService adminService;
     private final BotMetricsService metrics;
+    private final StarsPaymentService starsPaymentService;
 
     @Value("${bot.token}")
     private String botToken;
@@ -126,12 +130,14 @@ public class TelegramBotService {
     private ThreadPoolExecutor executorService;
 
     public TelegramBotService(GptService gptService, ImageService imageService, DocumentService documentService,
-                              BotAdminService adminService, BotMetricsService metrics) {
+                              BotAdminService adminService, BotMetricsService metrics,
+                              StarsPaymentService starsPaymentService) {
         this.gptService = gptService;
         this.imageService = imageService;
         this.documentService = documentService;
         this.adminService = adminService;
         this.metrics = metrics;
+        this.starsPaymentService = starsPaymentService;
     }
 
     @PostConstruct
@@ -212,12 +218,22 @@ public class TelegramBotService {
     }
 
     private void processUpdateInternal(Update update) {
+        if (update.preCheckoutQuery() != null) {
+            handlePreCheckoutQuery(update.preCheckoutQuery());
+            return;
+        }
+
         if (update.callbackQuery() != null) {
             processCallback(update.callbackQuery());
             return;
         }
 
         if (update.message() == null) return;
+
+        if (update.message().successfulPayment() != null) {
+            if (ensureAllowed(update)) handleSuccessfulPayment(update);
+            return;
+        }
 
         // Handle documents
         if (update.message().document() != null) {
@@ -278,6 +294,12 @@ public class TelegramBotService {
                 ? callback.message().chat().title()
                 : null;
         return gptService.isAllowed(fromId, username, chatTitle);
+    }
+
+    private boolean isPreCheckoutAllowed(PreCheckoutQuery query) {
+        Long fromId = query.from() != null ? query.from().id() : null;
+        String username = query.from() != null ? query.from().username() : null;
+        return gptService.isAllowed(fromId, username, null);
     }
 
     private boolean hasBotMention(Update update) {
@@ -631,6 +653,10 @@ public class TelegramBotService {
             handleUpgradeCallback(callback);
             return;
         }
+        if ("plan:buy".equals(data)) {
+            handleBuyCallback(callback);
+            return;
+        }
 
         bot.execute(new AnswerCallbackQuery(callback.id()).text("Unsupported action"));
     }
@@ -654,6 +680,25 @@ public class TelegramBotService {
         if (callback.message() != null) {
             editMessage(callback.message().chat().id(), callback.message().messageId(), request.userMessage());
         }
+    }
+
+    private void handleBuyCallback(CallbackQuery callback) {
+        if (callback.message() == null || callback.message().chat() == null) {
+            bot.execute(new AnswerCallbackQuery(callback.id()).text("Use /upgrade to buy PRO."));
+            return;
+        }
+        boolean sent = sendProInvoice(callback.message().chat().id(), callback.from().id());
+        if (sent) {
+            bot.execute(new AnswerCallbackQuery(callback.id()).text("Invoice sent."));
+            return;
+        }
+
+        bot.execute(new AnswerCallbackQuery(callback.id()).text("Invoice failed. Manual request sent."));
+        GptService.UpgradeRequest request = gptService.createUpgradeRequest(callback.from().id());
+        if (request.notifyOwners()) {
+            notifyOwners(request.ownerMessage());
+        }
+        editMessage(callback.message().chat().id(), callback.message().messageId(), request.userMessage());
     }
 
     private void handlePromptCommand(Update update) {
@@ -706,7 +751,8 @@ public class TelegramBotService {
 
     private void sendPlanMenu(Update update, String text) {
         InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
-        keyboard.addRow(new InlineKeyboardButton("Request PRO").callbackData("plan:upgrade"));
+        keyboard.addRow(new InlineKeyboardButton(starsPaymentService.buyButtonText()).callbackData("plan:buy"));
+        keyboard.addRow(new InlineKeyboardButton("Request PRO manually").callbackData("plan:upgrade"));
         SendMessage request = new SendMessage(update.message().chat().id(), text)
                 .disableWebPagePreview(true)
                 .disableNotification(true)
@@ -719,10 +765,58 @@ public class TelegramBotService {
     }
 
     private void handleUpgradeCommand(Update update) {
+        if (sendProInvoice(update.message().chat().id(), update.message().from().id())) {
+            return;
+        }
+        log.warn("Failed to send Stars invoice; falling back to manual upgrade request");
+        handleManualUpgradeRequest(update);
+    }
+
+    private void handleManualUpgradeRequest(Update update) {
         GptService.UpgradeRequest request = gptService.createUpgradeRequest(update.message().from().id());
         sendReply(update, request.userMessage());
         if (request.notifyOwners()) {
             notifyOwners(request.ownerMessage());
+        }
+    }
+
+    private boolean sendProInvoice(long chatId, long userId) {
+        SendResponse response = starsPaymentService.sendInvoice(bot, chatId, userId);
+        metrics.recordTelegramSend(false, response.isOk());
+        if (!response.isOk()) {
+            log.error("Failed to send Stars invoice: {}", response.description());
+            return false;
+        }
+        return true;
+    }
+
+    private void handlePreCheckoutQuery(PreCheckoutQuery query) {
+        if (!isPreCheckoutAllowed(query)) {
+            bot.execute(new AnswerPreCheckoutQuery(query.id(), ACCESS_DENIED_MESSAGE));
+            return;
+        }
+
+        Optional<String> validationError = starsPaymentService.validatePreCheckout(query);
+        if (validationError.isPresent()) {
+            bot.execute(new AnswerPreCheckoutQuery(query.id(), validationError.get()));
+            return;
+        }
+        bot.execute(new AnswerPreCheckoutQuery(query.id()));
+    }
+
+    private void handleSuccessfulPayment(Update update) {
+        Message message = update.message();
+        SuccessfulPayment payment = message.successfulPayment();
+        StarsPaymentService.PaymentResult result = starsPaymentService.processPayment(
+                message.from().id(),
+                payment.telegramPaymentChargeId(),
+                payment.currency(),
+                payment.totalAmount(),
+                payment.invoicePayload()
+        );
+        sendReply(update, result.userMessage());
+        if (result.notifyOwners()) {
+            notifyOwners(result.ownerMessage());
         }
     }
 
@@ -893,6 +987,9 @@ public class TelegramBotService {
         if (update.message() != null && update.message().from() != null) {
             return update.message().from().id();
         }
+        if (update.preCheckoutQuery() != null && update.preCheckoutQuery().from() != null) {
+            return update.preCheckoutQuery().from().id();
+        }
         if (update.callbackQuery() != null && update.callbackQuery().from() != null) {
             return update.callbackQuery().from().id();
         }
@@ -906,8 +1003,14 @@ public class TelegramBotService {
         if (update.callbackQuery() != null) {
             return "callback";
         }
+        if (update.preCheckoutQuery() != null) {
+            return "pre_checkout";
+        }
         if (update.message() == null) {
             return "empty";
+        }
+        if (update.message().successfulPayment() != null) {
+            return "payment";
         }
         if (update.message().document() != null) {
             return "document";

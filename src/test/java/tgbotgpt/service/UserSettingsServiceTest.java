@@ -227,6 +227,17 @@ class UserSettingsServiceTest {
     }
 
     @Test
+    void shouldActivatePaidProByExtendingExistingFutureExpiry() {
+        assertTrue(service.setBillingPlan(1L, "pro", 25));
+        LocalDateTime firstExpiry = service.getUsageStatus(1L, false).planExpiresAt();
+
+        assertTrue(service.activatePaidProPlan(1L, 30));
+
+        LocalDateTime paidExpiry = service.getUsageStatus(1L, false).planExpiresAt();
+        assertTrue(paidExpiry.isAfter(firstExpiry.plusDays(29)));
+    }
+
+    @Test
     void shouldTreatOwnerAsUnlimited() {
         service.recordUsage(1L, 100);
         service.recordUsage(1L, 100);

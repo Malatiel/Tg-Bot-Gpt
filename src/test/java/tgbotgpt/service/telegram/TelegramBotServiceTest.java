@@ -5,10 +5,13 @@ import com.pengrad.telegrambot.UpdatesListener;
 import com.pengrad.telegrambot.model.CallbackQuery;
 import com.pengrad.telegrambot.model.Chat;
 import com.pengrad.telegrambot.model.Message;
+import com.pengrad.telegrambot.model.PreCheckoutQuery;
+import com.pengrad.telegrambot.model.SuccessfulPayment;
 import com.pengrad.telegrambot.model.Update;
 import com.pengrad.telegrambot.model.User;
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
 import com.pengrad.telegrambot.request.AnswerCallbackQuery;
+import com.pengrad.telegrambot.request.AnswerPreCheckoutQuery;
 import com.pengrad.telegrambot.request.EditMessageText;
 import com.pengrad.telegrambot.request.SendMessage;
 import com.pengrad.telegrambot.response.BaseResponse;
@@ -21,10 +24,12 @@ import tgbotgpt.service.BotAdminService;
 import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.DocumentService;
 import tgbotgpt.service.ImageService;
+import tgbotgpt.service.StarsPaymentService;
 import tgbotgpt.service.openai.GptService;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -397,12 +402,36 @@ class TelegramBotServiceTest {
     }
 
     @Test
-    void upgradeCommandRepliesAndNotifiesOwners() {
+    void upgradeCommandSendsStarsInvoice() {
         TelegramBot bot = mock(TelegramBot.class);
         GptService gptService = mock(GptService.class);
         when(gptService.isAllowed(anyLong(), any(), any())).thenReturn(true);
         BotAdminService adminService = mock(BotAdminService.class);
         BotMetricsService metrics = mock(BotMetricsService.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        SendResponse invoiceResponse = sendResponseWith(0, null);
+        when(starsPaymentService.sendInvoice(bot, 100L, 1L)).thenReturn(invoiceResponse);
+
+        TelegramBotService service = newService(gptService, adminService, metrics, starsPaymentService);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/upgrade"));
+
+        verify(starsPaymentService).sendInvoice(bot, 100L, 1L);
+        verify(gptService, never()).createUpgradeRequest(anyLong());
+        verify(metrics).recordTelegramSend(false, true);
+    }
+
+    @Test
+    void upgradeCommandFallsBackToManualRequestWhenInvoiceFails() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        when(gptService.isAllowed(anyLong(), any(), any())).thenReturn(true);
+        BotAdminService adminService = mock(BotAdminService.class);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        SendResponse invoiceResponse = sendResponseWith(400, null);
+        when(starsPaymentService.sendInvoice(bot, 100L, 1L)).thenReturn(invoiceResponse);
         when(gptService.createUpgradeRequest(1L)).thenReturn(new GptService.UpgradeRequest(
                 "Upgrade request sent.",
                 "Approve Pro: /admin approve 1 30d",
@@ -411,11 +440,13 @@ class TelegramBotServiceTest {
         when(adminService.getOwnerIds()).thenReturn(Set.of(99L));
         doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
 
-        TelegramBotService service = newService(gptService, adminService, metrics);
+        TelegramBotService service = newService(gptService, adminService, metrics, starsPaymentService);
         ReflectionTestUtils.setField(service, "bot", bot);
 
         ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/upgrade"));
 
+        verify(starsPaymentService).sendInvoice(bot, 100L, 1L);
+        verify(gptService).createUpgradeRequest(1L);
         ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
         verify(bot, times(2)).execute(captor.capture());
         assertTrue(captor.getAllValues().stream()
@@ -525,17 +556,122 @@ class TelegramBotServiceTest {
         verify(metrics).recordOperationDuration(eq("callback"), eq(true), any(Duration.class));
     }
 
+    @Test
+    void buyCallbackSendsStarsInvoiceAndKeepsManualUpgradeCallbackAvailable() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        when(gptService.isAllowed(anyLong(), any(), any())).thenReturn(true);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        SendResponse invoiceResponse = sendResponseWith(0, null);
+        when(starsPaymentService.sendInvoice(bot, 100L, 1L)).thenReturn(invoiceResponse);
+        BaseResponse callbackResponse = mock(BaseResponse.class);
+        when(callbackResponse.isOk()).thenReturn(true);
+        doReturn(callbackResponse).when(bot).execute(any(AnswerCallbackQuery.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics, starsPaymentService);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", callbackUpdate("plan:buy"));
+
+        verify(starsPaymentService).sendInvoice(bot, 100L, 1L);
+        verify(gptService, never()).createUpgradeRequest(anyLong());
+        verify(bot).execute(any(AnswerCallbackQuery.class));
+    }
+
+    @Test
+    void preCheckoutQueryIsAnsweredOkWhenAllowedAndValid() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        when(gptService.isAllowed(1L, "test", null)).thenReturn(true);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        PreCheckoutQuery query = preCheckoutQuery(1L);
+        when(starsPaymentService.validatePreCheckout(query)).thenReturn(Optional.empty());
+        BaseResponse response = mock(BaseResponse.class);
+        when(response.isOk()).thenReturn(true);
+        doReturn(response).when(bot).execute(any(AnswerPreCheckoutQuery.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics, starsPaymentService);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", preCheckoutUpdate(query));
+
+        ArgumentCaptor<AnswerPreCheckoutQuery> captor = ArgumentCaptor.forClass(AnswerPreCheckoutQuery.class);
+        verify(bot).execute(captor.capture());
+        assertEquals(Boolean.TRUE, captor.getValue().getParameters().get("ok"));
+        verify(metrics).recordOperationDuration(eq("pre_checkout"), eq(true), any(Duration.class));
+    }
+
+    @Test
+    void unauthorizedPreCheckoutQueryIsRejectedBeforeValidation() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        when(gptService.isAllowed(1L, "test", null)).thenReturn(false);
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        PreCheckoutQuery query = preCheckoutQuery(1L);
+        BaseResponse response = mock(BaseResponse.class);
+        when(response.isOk()).thenReturn(true);
+        doReturn(response).when(bot).execute(any(AnswerPreCheckoutQuery.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics, starsPaymentService);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", preCheckoutUpdate(query));
+
+        ArgumentCaptor<AnswerPreCheckoutQuery> captor = ArgumentCaptor.forClass(AnswerPreCheckoutQuery.class);
+        verify(bot).execute(captor.capture());
+        assertEquals(Boolean.FALSE, captor.getValue().getParameters().get("ok"));
+        verify(starsPaymentService, never()).validatePreCheckout(any());
+    }
+
+    @Test
+    void successfulPaymentActivatesProAndNotifiesOwner() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        when(gptService.isAllowed(anyLong(), any(), any())).thenReturn(true);
+        BotAdminService adminService = mock(BotAdminService.class);
+        when(adminService.getOwnerIds()).thenReturn(Set.of(99L));
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        when(starsPaymentService.processPayment(1L, "charge-1", "XTR", 100, "pro:1"))
+                .thenReturn(new StarsPaymentService.PaymentResult("Payment received.", "Owner audit.", true, false));
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, adminService, metrics, starsPaymentService);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", successfulPaymentUpdate(1L));
+
+        verify(starsPaymentService).processPayment(1L, "charge-1", "XTR", 100, "pro:1");
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot, times(2)).execute(captor.capture());
+        assertTrue(captor.getAllValues().stream()
+                .anyMatch(request -> "Payment received.".equals(request.getParameters().get("text"))));
+        assertTrue(captor.getAllValues().stream()
+                .anyMatch(request -> "Owner audit.".equals(request.getParameters().get("text"))));
+    }
+
     private TelegramBotService newService(BotMetricsService metrics) {
         return newService(mock(GptService.class), mock(BotAdminService.class), metrics);
     }
 
     private TelegramBotService newService(GptService gptService, BotAdminService adminService, BotMetricsService metrics) {
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        when(starsPaymentService.buyButtonText()).thenReturn("Buy PRO");
+        return newService(gptService, adminService, metrics, starsPaymentService);
+    }
+
+    private TelegramBotService newService(GptService gptService, BotAdminService adminService,
+                                          BotMetricsService metrics, StarsPaymentService starsPaymentService) {
         return new TelegramBotService(
                 gptService,
                 mock(ImageService.class),
                 mock(DocumentService.class),
                 adminService,
-                metrics
+                metrics,
+                starsPaymentService
         );
     }
 
@@ -601,8 +737,38 @@ class TelegramBotServiceTest {
         when(user.id()).thenReturn(1L);
         when(user.username()).thenReturn("test");
         when(message.chat()).thenReturn(chat);
+        when(message.messageId()).thenReturn(42);
+        when(chat.id()).thenReturn(100L);
         when(chat.title()).thenReturn("group");
 
+        return update;
+    }
+
+    private Update preCheckoutUpdate(PreCheckoutQuery query) {
+        Update update = mock(Update.class);
+        when(update.preCheckoutQuery()).thenReturn(query);
+        return update;
+    }
+
+    private PreCheckoutQuery preCheckoutQuery(Long userId) {
+        PreCheckoutQuery query = mock(PreCheckoutQuery.class);
+        User user = mock(User.class);
+        when(query.id()).thenReturn("pre-checkout-id");
+        when(query.from()).thenReturn(user);
+        when(user.id()).thenReturn(userId);
+        when(user.username()).thenReturn("test");
+        return query;
+    }
+
+    private Update successfulPaymentUpdate(Long userId) {
+        Update update = textUpdate(userId, null);
+        SuccessfulPayment payment = mock(SuccessfulPayment.class);
+        when(update.message().text()).thenReturn(null);
+        when(update.message().successfulPayment()).thenReturn(payment);
+        when(payment.telegramPaymentChargeId()).thenReturn("charge-1");
+        when(payment.currency()).thenReturn("XTR");
+        when(payment.totalAmount()).thenReturn(100);
+        when(payment.invoicePayload()).thenReturn("pro:1");
         return update;
     }
 
