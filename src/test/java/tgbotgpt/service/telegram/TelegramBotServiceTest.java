@@ -671,7 +671,9 @@ class TelegramBotServiceTest {
                 mock(DocumentService.class),
                 adminService,
                 metrics,
-                starsPaymentService
+                starsPaymentService,
+                new TelegramSender(metrics),
+                new AdminCommandHandler(gptService, adminService)
         );
     }
 

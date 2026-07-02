@@ -5,12 +5,9 @@ import com.pengrad.telegrambot.UpdatesListener;
 import com.pengrad.telegrambot.model.*;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
-import com.pengrad.telegrambot.model.request.ParseMode;
-import com.pengrad.telegrambot.model.request.ReplyKeyboardRemove;
 import com.pengrad.telegrambot.request.AnswerCallbackQuery;
 import com.pengrad.telegrambot.request.AnswerPreCheckoutQuery;
 import com.pengrad.telegrambot.request.BaseRequest;
-import com.pengrad.telegrambot.request.EditMessageText;
 import com.pengrad.telegrambot.request.GetFile;
 import com.pengrad.telegrambot.request.SendMessage;
 import com.pengrad.telegrambot.response.BaseResponse;
@@ -110,6 +107,8 @@ public class TelegramBotService {
     private final BotAdminService adminService;
     private final BotMetricsService metrics;
     private final StarsPaymentService starsPaymentService;
+    private final TelegramSender telegramSender;
+    private final AdminCommandHandler adminCommandHandler;
 
     @Value("${bot.token}")
     private String botToken;
@@ -131,13 +130,16 @@ public class TelegramBotService {
 
     public TelegramBotService(GptService gptService, ImageService imageService, DocumentService documentService,
                               BotAdminService adminService, BotMetricsService metrics,
-                              StarsPaymentService starsPaymentService) {
+                              StarsPaymentService starsPaymentService, TelegramSender telegramSender,
+                              AdminCommandHandler adminCommandHandler) {
         this.gptService = gptService;
         this.imageService = imageService;
         this.documentService = documentService;
         this.adminService = adminService;
         this.metrics = metrics;
         this.starsPaymentService = starsPaymentService;
+        this.telegramSender = telegramSender;
+        this.adminCommandHandler = adminCommandHandler;
     }
 
     @PostConstruct
@@ -440,15 +442,7 @@ public class TelegramBotService {
     }
 
     private void editMessage(long chatId, int messageId, String text) {
-        try {
-            BaseResponse response = executeWithRetry(
-                    new EditMessageText(chatId, messageId, TelegramUtils.truncateForEdit(text)),
-                    "edit");
-            metrics.recordTelegramEdit(response.isOk());
-        } catch (Exception e) {
-            metrics.recordTelegramEdit(false);
-            log.error("Failed to edit message: ", e);
-        }
+        telegramSender.editMessage(bot, chatId, messageId, text, telegramRetryMaxBackoffMs);
     }
 
     /**
@@ -459,64 +453,15 @@ public class TelegramBotService {
      * whether to fall back (e.g. plain-text after Markdown 400).
      */
     <T extends BaseResponse> T executeWithRetry(BaseRequest<?, T> request, String operation) {
-        T response = bot.execute(request);
-        if (response.isOk() || response.errorCode() != 429) {
-            return response;
-        }
-        Integer retryAfter = response.parameters() != null ? response.parameters().retryAfter() : null;
-        if (retryAfter == null) {
-            return response;
-        }
-        long sleepMs = retryAfter * 1000L;
-        if (sleepMs > telegramRetryMaxBackoffMs) {
-            log.warn("Telegram {} retry_after {}s exceeds {}ms cap; skipping retry",
-                    operation, retryAfter, telegramRetryMaxBackoffMs);
-            metrics.recordTelegramRetry(operation + ".skipped");
-            return response;
-        }
-        log.warn("Telegram {} rate-limited; retry_after={}s", operation, retryAfter);
-        metrics.recordTelegramRetry(operation);
-        try {
-            Thread.sleep(sleepMs);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return response;
-        }
-        return bot.execute(request);
+        return telegramSender.executeWithRetry(bot, request, operation, telegramRetryMaxBackoffMs);
     }
 
     private void sendLongReply(Update update, String message) {
-        List<String> parts = TelegramUtils.splitMessage(message);
-        for (String part : parts) {
-            sendReply(update, part);
-        }
+        telegramSender.sendLongReply(bot, update, message, telegramRetryMaxBackoffMs);
     }
 
     private void sendReply(Update update, String message) {
-        SendResponse sendResponse = executeWithRetry(buildSendMessage(update, message, true), "send");
-        metrics.recordTelegramSend(true, sendResponse.isOk());
-        if (!sendResponse.isOk()) {
-            log.warn("Failed to send Markdown message: {}", sendResponse.description());
-            SendResponse plainResponse = executeWithRetry(buildSendMessage(update, message, false), "send");
-            metrics.recordTelegramSend(false, plainResponse.isOk());
-            if (!plainResponse.isOk()) {
-                log.error("Failed to send plain message: {}", plainResponse.description());
-            }
-        }
-    }
-
-    private SendMessage buildSendMessage(Update update, String message, boolean markdown) {
-        SendMessage request = new SendMessage(update.message().chat().id(), message)
-                .disableWebPagePreview(true)
-                .disableNotification(true)
-                .replyMarkup(new ReplyKeyboardRemove());
-        if (markdown) {
-            request.parseMode(ParseMode.Markdown);
-        }
-        if (!UpdateUtils.isPrivate(update)) {
-            request.replyToMessageId(update.message().messageId());
-        }
-        return request;
+        telegramSender.sendReply(bot, update, message, telegramRetryMaxBackoffMs);
     }
 
     private String mapDocumentError(DocumentExtractionResult.Status status) {
@@ -821,126 +766,7 @@ public class TelegramBotService {
     }
 
     private void handleAdminCommand(Update update) {
-        String text = update.message().text().trim();
-        Long requesterId = update.message().from().id();
-        String[] parts = text.split("\\s+");
-
-        if (parts.length == 1) {
-            sendReply(update, gptService.getAdminHelp(requesterId));
-            return;
-        }
-
-        String action = parts[1].toLowerCase();
-        switch (action) {
-            case "status" -> handleStatusCommand(update);
-            case "users" -> sendReply(update, gptService.getAdminUsersSummary(requesterId));
-            case "usage" -> handleAdminUsageCommand(update, requesterId, parts);
-            case "plan" -> handleAdminPlanCommand(update, requesterId, parts);
-            case "approve" -> handleAdminApproveCommand(update, requesterId, parts);
-            case "extend" -> handleAdminExtendCommand(update, requesterId, parts);
-            case "downgrade" -> handleAdminDowngradeCommand(update, requesterId, parts);
-            default -> sendReply(update, gptService.getAdminHelp(requesterId));
-        }
-    }
-
-    private void handleAdminUsageCommand(Update update, Long requesterId, String[] parts) {
-        if (parts.length != 3) {
-            sendReply(update, "Usage: /admin usage <telegram_id>");
-            return;
-        }
-        try {
-            Long targetUserId = Long.parseLong(parts[2]);
-            sendReply(update, gptService.getAdminUserUsage(requesterId, targetUserId));
-        } catch (NumberFormatException e) {
-            sendReply(update, "Usage: /admin usage <telegram_id>");
-        }
-    }
-
-    private void handleAdminPlanCommand(Update update, Long requesterId, String[] parts) {
-        if (parts.length != 4 && parts.length != 5) {
-            sendReply(update, "Usage: /admin plan <telegram_id> <free|pro|owner> [days]");
-            return;
-        }
-        try {
-            Long targetUserId = Long.parseLong(parts[2]);
-            if (parts.length == 5 && "pro".equalsIgnoreCase(parts[3])) {
-                Integer days = parseDays(parts[4]);
-                if (days == null) {
-                    sendReply(update, "Usage: /admin plan <telegram_id> pro <days>");
-                    return;
-                }
-                sendReply(update, gptService.approveUserPro(requesterId, targetUserId, days));
-                return;
-            }
-            sendReply(update, gptService.setUserBillingPlan(requesterId, targetUserId, parts[3]));
-        } catch (NumberFormatException e) {
-            sendReply(update, "Usage: /admin plan <telegram_id> <free|pro|owner> [days]");
-        }
-    }
-
-    private void handleAdminApproveCommand(Update update, Long requesterId, String[] parts) {
-        if (parts.length != 3 && parts.length != 4) {
-            sendReply(update, "Usage: /admin approve <telegram_id> [days]");
-            return;
-        }
-        try {
-            Long targetUserId = Long.parseLong(parts[2]);
-            Integer days = parts.length == 4 ? parseDays(parts[3]) : 30;
-            if (days == null) {
-                sendReply(update, "Usage: /admin approve <telegram_id> [days]");
-                return;
-            }
-            sendReply(update, gptService.approveUserPro(requesterId, targetUserId, days));
-        } catch (NumberFormatException e) {
-            sendReply(update, "Usage: /admin approve <telegram_id> [days]");
-        }
-    }
-
-    private void handleAdminExtendCommand(Update update, Long requesterId, String[] parts) {
-        if (parts.length != 4) {
-            sendReply(update, "Usage: /admin extend <telegram_id> <days>");
-            return;
-        }
-        try {
-            Long targetUserId = Long.parseLong(parts[2]);
-            Integer days = parseDays(parts[3]);
-            if (days == null) {
-                sendReply(update, "Usage: /admin extend <telegram_id> <days>");
-                return;
-            }
-            sendReply(update, gptService.extendUserPro(requesterId, targetUserId, days));
-        } catch (NumberFormatException e) {
-            sendReply(update, "Usage: /admin extend <telegram_id> <days>");
-        }
-    }
-
-    private void handleAdminDowngradeCommand(Update update, Long requesterId, String[] parts) {
-        if (parts.length != 3) {
-            sendReply(update, "Usage: /admin downgrade <telegram_id>");
-            return;
-        }
-        try {
-            Long targetUserId = Long.parseLong(parts[2]);
-            sendReply(update, gptService.downgradeUser(requesterId, targetUserId));
-        } catch (NumberFormatException e) {
-            sendReply(update, "Usage: /admin downgrade <telegram_id>");
-        }
-    }
-
-    private Integer parseDays(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        String normalized = value.trim().toLowerCase();
-        if (normalized.endsWith("d")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        try {
-            int days = Integer.parseInt(normalized);
-            return days > 0 ? days : null;
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        sendReply(update, adminCommandHandler.handle(update));
     }
 
     private void sendWelcome(Update update) {

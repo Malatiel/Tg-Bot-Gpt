@@ -5,7 +5,6 @@ import lombok.Data;
 import lombok.experimental.Accessors;
 import tgbotgpt.model.dto.Message;
 
-import javax.annotation.processing.Generated;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +18,6 @@ import java.util.Map;
         "stream",
         "stream_options"
 })
-@Generated("jsonschema2pojo")
 @Data
 @Accessors(chain = true)
 public class ChatRequest {
