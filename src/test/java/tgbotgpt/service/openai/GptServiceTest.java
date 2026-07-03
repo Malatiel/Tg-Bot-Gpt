@@ -613,6 +613,20 @@ class GptServiceTest {
     }
 
     @Test
+    void shouldLabelTrialExpiryInBalanceSummary() {
+        LocalDateTime expiresAt = LocalDateTime.of(2026, 5, 7, 12, 0);
+        when(userSettings.getUsageStatus(1L, false)).thenReturn(new UserSettingsService.UsageStatus(
+                "trial", "2026-04", 1000, 20, 300, 5, 1000000, 2000, expiresAt
+        ));
+
+        String balance = gptService.getBalanceSummary(1L);
+
+        assertTrue(balance.contains("Plan: TRIAL"));
+        assertTrue(balance.contains("Trial expires: 2026-05-07 12:00"));
+        assertFalse(balance.contains("Plan expires: 2026-05-07 12:00"));
+    }
+
+    @Test
     void shouldLetOwnerSetUserBillingPlan() {
         when(adminService.isOwner(99L)).thenReturn(true);
         when(userSettings.setBillingPlan(1L, "pro")).thenReturn(true);

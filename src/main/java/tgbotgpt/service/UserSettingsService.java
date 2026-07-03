@@ -12,6 +12,7 @@ import tgbotgpt.repository.BotUserRepository;
 
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -24,6 +25,11 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class UserSettingsService {
+    private static final String PLAN_FREE = "free";
+    private static final String PLAN_PRO = "pro";
+    private static final String PLAN_OWNER = "owner";
+    private static final String PLAN_TRIAL = "trial";
+    private static final int TRIAL_DAYS = 7;
 
     @Value("${openai.model}")
     private String defaultModel;
@@ -141,7 +147,7 @@ public class UserSettingsService {
             return userRepository.save(user);
         }).orElseGet(() -> {
             BotUser user = new BotUser(userId, username, firstName);
-            user.setBillingPlan(normalizePlan(defaultBillingPlan));
+            activateTrial(user);
             user.setUsagePeriod(currentPeriod());
             return userRepository.save(user);
         });
@@ -175,7 +181,7 @@ public class UserSettingsService {
     @Transactional
     public boolean setBillingPlan(Long userId, String plan, int days) {
         String normalized = plan == null ? "" : plan.trim().toLowerCase(Locale.ROOT);
-        if (!isKnownPlan(normalized)) {
+        if (!isAdminAssignablePlan(normalized)) {
             return false;
         }
         BotUser user = getOrCreateUser(userId, null, null);
@@ -192,7 +198,7 @@ public class UserSettingsService {
         }
         BotUser user = getOrCreateUser(userId, null, null);
         ensureCurrentBillingPeriod(user);
-        applyBillingPlan(user, "pro", days, true);
+        applyBillingPlan(user, PLAN_PRO, days, true);
         userRepository.save(user);
         return true;
     }
@@ -204,10 +210,10 @@ public class UserSettingsService {
         }
         BotUser user = getOrCreateUser(userId, null, null);
         ensureCurrentBillingPeriod(user);
-        if ("owner".equals(user.getBillingPlan())) {
+        if (PLAN_OWNER.equals(user.getBillingPlan())) {
             return true;
         }
-        applyBillingPlan(user, "pro", days, "pro".equals(user.getBillingPlan()));
+        applyBillingPlan(user, PLAN_PRO, days, PLAN_PRO.equals(user.getBillingPlan()));
         userRepository.save(user);
         return true;
     }
@@ -216,7 +222,7 @@ public class UserSettingsService {
     public boolean downgradeToFree(Long userId) {
         BotUser user = getOrCreateUser(userId, null, null);
         ensureCurrentBillingPeriod(user);
-        applyBillingPlan(user, "free", 0, false);
+        applyBillingPlan(user, PLAN_FREE, 0, false);
         userRepository.save(user);
         return true;
     }
@@ -238,7 +244,7 @@ public class UserSettingsService {
                 user.getPeriodMessages(),
                 tokenLimit(plan),
                 messageLimit(plan),
-                user.getPlanExpiresAt()
+                displayExpiresAt(user)
         );
     }
 
@@ -325,7 +331,7 @@ public class UserSettingsService {
     }
 
     public Set<String> getAvailableBillingPlans() {
-        return Set.of("free", "pro", "owner");
+        return Set.of(PLAN_FREE, PLAN_PRO, PLAN_OWNER);
     }
 
     public int getMonthlyTokenLimit(String plan) {
@@ -344,7 +350,7 @@ public class UserSettingsService {
                         user.getTelegramId(),
                         user.getUsername(),
                         normalizePlan(user.getBillingPlan()),
-                        user.getPlanExpiresAt(),
+                        displayExpiresAt(user),
                         user.getUsagePeriod(),
                         user.getPeriodTokensUsed(),
                         user.getPeriodMessages(),
@@ -359,14 +365,18 @@ public class UserSettingsService {
     public void cleanupExpiredPlans() {
         int downgraded = downgradeExpiredPlans();
         if (downgraded > 0) {
-            log.info("Downgraded {} expired Pro users to Free", downgraded);
+            log.info("Downgraded {} expired paid/trial users to Free", downgraded);
         }
     }
 
     @Transactional
     public int downgradeExpiredPlans() {
-        List<BotUser> expired = userRepository.findByBillingPlanAndPlanExpiresAtBefore("pro", LocalDateTime.now());
-        expired.forEach(user -> applyBillingPlan(user, "free", 0, false));
+        LocalDateTime now = LocalDateTime.now();
+        List<BotUser> expired = new ArrayList<>(
+                userRepository.findByBillingPlanAndPlanExpiresAtBefore(PLAN_PRO, now)
+        );
+        expired.addAll(userRepository.findByBillingPlanAndTrialEndsAtBefore(PLAN_TRIAL, now));
+        expired.forEach(user -> applyBillingPlan(user, PLAN_FREE, 0, false));
         userRepository.saveAll(expired);
         return expired.size();
     }
@@ -377,15 +387,23 @@ public class UserSettingsService {
         } else {
             user.setBillingPlan(normalizePlan(user.getBillingPlan()));
         }
-        if ("pro".equals(user.getBillingPlan()) && isExpired(user.getPlanExpiresAt())) {
-            user.setBillingPlan("free");
+        if (PLAN_PRO.equals(user.getBillingPlan()) && isExpired(user.getPlanExpiresAt())) {
+            user.setBillingPlan(PLAN_FREE);
             user.setPlanExpiresAt(null);
         }
-        if ("pro".equals(user.getBillingPlan()) && user.getPlanExpiresAt() == null) {
+        if (PLAN_TRIAL.equals(user.getBillingPlan())
+                && (user.getTrialEndsAt() == null || isExpired(user.getTrialEndsAt()))) {
+            user.setBillingPlan(PLAN_FREE);
+            user.setTrialEndsAt(null);
+        }
+        if (PLAN_PRO.equals(user.getBillingPlan()) && user.getPlanExpiresAt() == null) {
             user.setPlanExpiresAt(LocalDateTime.now().plusDays(Math.max(1, proDefaultDays)));
         }
-        if (!"pro".equals(user.getBillingPlan())) {
+        if (!PLAN_PRO.equals(user.getBillingPlan())) {
             user.setPlanExpiresAt(null);
+        }
+        if (!PLAN_TRIAL.equals(user.getBillingPlan())) {
+            user.setTrialEndsAt(null);
         }
         if (user.getUsagePeriod() == null || user.getUsagePeriod().isBlank()) {
             user.setUsagePeriod(currentPeriod());
@@ -402,7 +420,7 @@ public class UserSettingsService {
 
     private String effectivePlan(BotUser user, boolean owner) {
         if (owner) {
-            return "owner";
+            return PLAN_OWNER;
         }
         return normalizePlan(user.getBillingPlan());
     }
@@ -410,18 +428,23 @@ public class UserSettingsService {
     private String normalizePlan(String plan) {
         String normalized = plan == null ? "" : plan.trim().toLowerCase(Locale.ROOT);
         if (!isKnownPlan(normalized)) {
-            return "free";
+            return PLAN_FREE;
         }
         return normalized;
     }
 
     private boolean isKnownPlan(String plan) {
-        return "free".equals(plan) || "pro".equals(plan) || "owner".equals(plan);
+        return PLAN_FREE.equals(plan) || PLAN_PRO.equals(plan) || PLAN_OWNER.equals(plan) || PLAN_TRIAL.equals(plan);
+    }
+
+    private boolean isAdminAssignablePlan(String plan) {
+        return PLAN_FREE.equals(plan) || PLAN_PRO.equals(plan) || PLAN_OWNER.equals(plan);
     }
 
     private void applyBillingPlan(BotUser user, String plan, int days, boolean extend) {
         user.setBillingPlan(plan);
-        if ("pro".equals(plan)) {
+        user.setTrialEndsAt(null);
+        if (PLAN_PRO.equals(plan)) {
             int actualDays = Math.max(1, days);
             LocalDateTime now = LocalDateTime.now();
             LocalDateTime base = extend && user.getPlanExpiresAt() != null && user.getPlanExpiresAt().isAfter(now)
@@ -433,22 +456,34 @@ public class UserSettingsService {
         user.setPlanExpiresAt(null);
     }
 
+    private void activateTrial(BotUser user) {
+        user.setBillingPlan(PLAN_TRIAL);
+        user.setPlanExpiresAt(null);
+        user.setTrialEndsAt(LocalDateTime.now().plusDays(TRIAL_DAYS));
+    }
+
+    private LocalDateTime displayExpiresAt(BotUser user) {
+        return PLAN_TRIAL.equals(normalizePlan(user.getBillingPlan()))
+                ? user.getTrialEndsAt()
+                : user.getPlanExpiresAt();
+    }
+
     private boolean isExpired(LocalDateTime expiresAt) {
         return expiresAt != null && !expiresAt.isAfter(LocalDateTime.now());
     }
 
     private int tokenLimit(String plan) {
         return switch (normalizePlan(plan)) {
-            case "pro" -> proMonthlyTokens;
-            case "owner" -> -1;
+            case PLAN_PRO, PLAN_TRIAL -> proMonthlyTokens;
+            case PLAN_OWNER -> -1;
             default -> freeMonthlyTokens;
         };
     }
 
     private int messageLimit(String plan) {
         return switch (normalizePlan(plan)) {
-            case "pro" -> proMonthlyMessages;
-            case "owner" -> -1;
+            case PLAN_PRO, PLAN_TRIAL -> proMonthlyMessages;
+            case PLAN_OWNER -> -1;
             default -> freeMonthlyMessages;
         };
     }

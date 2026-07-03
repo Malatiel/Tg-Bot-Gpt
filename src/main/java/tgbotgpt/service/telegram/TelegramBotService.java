@@ -26,6 +26,7 @@ import tgbotgpt.service.DocumentService;
 import tgbotgpt.service.ImageService;
 import tgbotgpt.service.ImageDownloadResult;
 import tgbotgpt.service.StarsPaymentService;
+import tgbotgpt.service.UserSettingsService;
 import tgbotgpt.service.openai.GptService;
 import tgbotgpt.utils.LogUtils;
 import tgbotgpt.utils.TelegramUtils;
@@ -59,6 +60,10 @@ public class TelegramBotService {
             I can answer questions, keep recent private-chat context, analyze photos, and read PDF/TXT documents.
 
             Send a message to start. Use /help for commands, /settings for model and limits, or /plan to request Pro.
+            """;
+    private static final String TRIAL_WELCOME_SUFFIX = """
+
+            Your 7-day free Pro trial is active. During the trial, you have Pro monthly limits.
             """;
     private static final String HELP_MESSAGE = """
             GPTbot help
@@ -770,7 +775,12 @@ public class TelegramBotService {
     }
 
     private void sendWelcome(Update update) {
-        sendReply(update, WELCOME_MESSAGE.strip());
+        UserSettingsService.UsageStatus status = gptService.ensureUser(update);
+        String message = WELCOME_MESSAGE;
+        if ("trial".equals(status.plan())) {
+            message += TRIAL_WELCOME_SUFFIX;
+        }
+        sendReply(update, message.strip());
     }
 
     private void sendHelp(Update update) {

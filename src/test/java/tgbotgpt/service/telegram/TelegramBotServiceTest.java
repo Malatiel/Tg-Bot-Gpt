@@ -25,9 +25,11 @@ import tgbotgpt.service.BotMetricsService;
 import tgbotgpt.service.DocumentService;
 import tgbotgpt.service.ImageService;
 import tgbotgpt.service.StarsPaymentService;
+import tgbotgpt.service.UserSettingsService;
 import tgbotgpt.service.openai.GptService;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -284,6 +286,9 @@ class TelegramBotServiceTest {
         TelegramBot bot = mock(TelegramBot.class);
         GptService gptService = mock(GptService.class);
         when(gptService.isAllowed(anyLong(), any(), any())).thenReturn(true);
+        when(gptService.ensureUser(any())).thenReturn(new UserSettingsService.UsageStatus(
+                "free", "2026-04", 0, 0, 0, 0, 50000, 100, null
+        ));
         BotMetricsService metrics = mock(BotMetricsService.class);
         doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
 
@@ -297,7 +302,33 @@ class TelegramBotServiceTest {
         String text = (String) captor.getValue().getParameters().get("text");
         assertTrue(text.contains("Hello! I am GPTbot in Telegram."));
         assertTrue(text.contains("/help"));
+        assertTrue(text.contains("/plan"));
+        verify(gptService).ensureUser(any());
         verify(gptService, never()).sendCustomMessage(any(), any());
+    }
+
+    @Test
+    void startCommandAnnouncesActiveTrial() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        when(gptService.isAllowed(anyLong(), any(), any())).thenReturn(true);
+        when(gptService.ensureUser(any())).thenReturn(new UserSettingsService.UsageStatus(
+                "trial", "2026-04", 0, 0, 0, 0, 1000000, 2000,
+                LocalDateTime.of(2026, 5, 7, 12, 0)
+        ));
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, mock(BotAdminService.class), metrics);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", textUpdate(1L, "/start"));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot).execute(captor.capture());
+        String text = (String) captor.getValue().getParameters().get("text");
+        assertTrue(text.contains("7-day free Pro trial is active"));
+        assertTrue(text.contains("Pro monthly limits"));
     }
 
     @Test

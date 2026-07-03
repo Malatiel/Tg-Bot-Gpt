@@ -443,7 +443,7 @@ public class GptService {
         return """
                 Settings
                 Plan: %s
-                Plan expires: %s
+                %s: %s
                 Model: %s
                 Available models: %s
                 Prompt: %s
@@ -453,6 +453,7 @@ public class GptService {
                 History: up to %d messages and about %d tokens
                 """.formatted(
                 usage.plan().toUpperCase(Locale.ROOT),
+                expiryLabel(usage.plan()),
                 formatPlanExpiry(usage.plan(), usage.planExpiresAt()),
                 getUserModel(userId),
                 getAvailableModels(),
@@ -492,13 +493,14 @@ public class GptService {
         return """
                 Balance
                 Plan: %s
-                Plan expires: %s
+                %s: %s
                 Period: %s
                 Tokens this month: %d/%s (%s remaining)
                 Messages this month: %d/%s (%s remaining)
                 Lifetime usage: %d tokens, %d messages
                 """.formatted(
                 status.plan().toUpperCase(Locale.ROOT),
+                expiryLabel(status.plan()),
                 formatPlanExpiry(status.plan(), status.planExpiresAt()),
                 status.period(),
                 status.periodTokensUsed(),
@@ -727,21 +729,26 @@ public class GptService {
         if ("owner".equals(plan)) {
             return "never";
         }
-        if (!"pro".equals(plan)) {
+        if (!"pro".equals(plan) && !"trial".equals(plan)) {
             return "not applicable";
         }
         return expiresAt == null ? "not set" : formatDateTime(expiresAt);
+    }
+
+    private String expiryLabel(String plan) {
+        return "trial".equals(plan) ? "Trial expires" : "Plan expires";
     }
 
     private String formatDateTime(LocalDateTime dateTime) {
         return PLAN_EXPIRY_FORMAT.format(dateTime);
     }
 
-    private void ensureUser(Update update) {
+    public UserSettingsService.UsageStatus ensureUser(Update update) {
         Long userId = update.message().from().id();
         String username = update.message().from().username();
         String firstName = update.message().from().firstName();
         userSettings.getOrCreateUser(userId, username, firstName);
+        return userSettings.getUsageStatus(userId, adminService.isOwner(userId));
     }
 
     private ChatRequest createChatRequest(Update update) {

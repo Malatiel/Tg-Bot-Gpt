@@ -10,6 +10,8 @@ import java.util.List;
 public interface BotUserRepository extends JpaRepository<BotUser, Long> {
     List<BotUser> findByBillingPlanAndPlanExpiresAtBefore(String billingPlan, LocalDateTime cutoff);
 
+    List<BotUser> findByBillingPlanAndTrialEndsAtBefore(String billingPlan, LocalDateTime cutoff);
+
     /** Most-recently-active users first; the limit is supplied via {@link Pageable}. */
     List<BotUser> findAllByOrderByLastActiveDesc(Pageable pageable);
 }

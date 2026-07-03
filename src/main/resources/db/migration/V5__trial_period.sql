@@ -1,0 +1,2 @@
+ALTER TABLE bot_users
+    ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP(6);

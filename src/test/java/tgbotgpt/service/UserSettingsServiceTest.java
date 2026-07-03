@@ -103,10 +103,29 @@ class UserSettingsServiceTest {
 
     @Test
     void shouldCreateAndTrackUser() {
+        LocalDateTime before = LocalDateTime.now().plusDays(6);
         BotUser user = service.getOrCreateUser(42L, "john", "John");
         assertNotNull(user);
         assertEquals("john", user.getUsername());
         assertEquals("John", user.getFirstName());
+        assertEquals("trial", user.getBillingPlan());
+        assertNotNull(user.getTrialEndsAt());
+        assertTrue(user.getTrialEndsAt().isAfter(before));
+        assertTrue(user.getTrialEndsAt().isBefore(LocalDateTime.now().plusDays(8)));
+        assertNull(user.getPlanExpiresAt());
+    }
+
+    @Test
+    void shouldNotGrantTrialToExistingUser() {
+        BotUser user = new BotUser(42L, "john", "John");
+        user.setBillingPlan("free");
+        userRepository.save(user);
+
+        BotUser existing = service.getOrCreateUser(42L, "johnny", "Johnny");
+
+        assertEquals("free", existing.getBillingPlan());
+        assertNull(existing.getTrialEndsAt());
+        assertEquals("johnny", existing.getUsername());
     }
 
     @Test
@@ -122,18 +141,20 @@ class UserSettingsServiceTest {
     }
 
     @Test
-    void shouldExposeDefaultFreeUsageStatus() {
+    void shouldExposeTrialUsageStatusForNewUser() {
         UserSettingsService.UsageStatus status = service.getUsageStatus(1L, false);
 
-        assertEquals("free", status.plan());
-        assertEquals(100, status.tokenLimit());
-        assertEquals(2, status.messageLimit());
-        assertEquals(100, status.remainingTokens());
-        assertEquals(2, status.remainingMessages());
+        assertEquals("trial", status.plan());
+        assertNotNull(status.planExpiresAt());
+        assertEquals(1000, status.tokenLimit());
+        assertEquals(20, status.messageLimit());
+        assertEquals(1000, status.remainingTokens());
+        assertEquals(20, status.remainingMessages());
     }
 
     @Test
     void shouldBlockWhenMonthlyMessageLimitReached() {
+        service.setBillingPlan(1L, "free");
         service.recordUsage(1L, 10);
         service.recordUsage(1L, 10);
 
@@ -184,6 +205,20 @@ class UserSettingsServiceTest {
     }
 
     @Test
+    void shouldDowngradeExpiredTrialToFree() {
+        BotUser user = new BotUser(1L, "test", "Test");
+        user.setBillingPlan("trial");
+        user.setTrialEndsAt(LocalDateTime.now().minusMinutes(1));
+        userRepository.save(user);
+
+        UserSettingsService.UsageStatus status = service.getUsageStatus(1L, false);
+
+        assertEquals("free", status.plan());
+        assertNull(status.planExpiresAt());
+        assertNull(userRepository.findById(1L).orElseThrow().getTrialEndsAt());
+    }
+
+    @Test
     void shouldGiveLegacyProWithoutExpiryDefaultExpiry() {
         BotUser user = new BotUser(1L, "test", "Test");
         user.setBillingPlan("pro");
@@ -207,12 +242,23 @@ class UserSettingsServiceTest {
         active.setBillingPlan("pro");
         active.setPlanExpiresAt(LocalDateTime.now().plusDays(1));
         userRepository.save(active);
+        BotUser expiredTrial = new BotUser(3L, "trial", "Trial");
+        expiredTrial.setBillingPlan("trial");
+        expiredTrial.setTrialEndsAt(LocalDateTime.now().minusDays(1));
+        userRepository.save(expiredTrial);
+        BotUser activeTrial = new BotUser(4L, "trial_active", "TrialActive");
+        activeTrial.setBillingPlan("trial");
+        activeTrial.setTrialEndsAt(LocalDateTime.now().plusDays(1));
+        userRepository.save(activeTrial);
 
-        assertEquals(1, service.downgradeExpiredPlans());
+        assertEquals(2, service.downgradeExpiredPlans());
 
         assertEquals("free", userRepository.findById(1L).orElseThrow().getBillingPlan());
         assertNull(userRepository.findById(1L).orElseThrow().getPlanExpiresAt());
         assertEquals("pro", userRepository.findById(2L).orElseThrow().getBillingPlan());
+        assertEquals("free", userRepository.findById(3L).orElseThrow().getBillingPlan());
+        assertNull(userRepository.findById(3L).orElseThrow().getTrialEndsAt());
+        assertEquals("trial", userRepository.findById(4L).orElseThrow().getBillingPlan());
     }
 
     @Test
@@ -238,6 +284,21 @@ class UserSettingsServiceTest {
     }
 
     @Test
+    void shouldActivatePaidProFromTrialWithoutExtendingTrial() {
+        BotUser trial = service.getOrCreateUser(1L, "trial", "Trial");
+        LocalDateTime trialEndsAt = trial.getTrialEndsAt();
+
+        assertTrue(service.activatePaidProPlan(1L, 30));
+
+        BotUser paid = userRepository.findById(1L).orElseThrow();
+        assertEquals("pro", paid.getBillingPlan());
+        assertNull(paid.getTrialEndsAt());
+        assertNotNull(paid.getPlanExpiresAt());
+        assertTrue(paid.getPlanExpiresAt().isAfter(LocalDateTime.now().plusDays(29)));
+        assertTrue(paid.getPlanExpiresAt().isAfter(trialEndsAt.plusDays(22)));
+    }
+
+    @Test
     void shouldTreatOwnerAsUnlimited() {
         service.recordUsage(1L, 100);
         service.recordUsage(1L, 100);
@@ -252,6 +313,11 @@ class UserSettingsServiceTest {
     @Test
     void shouldRejectUnknownBillingPlan() {
         assertFalse(service.setBillingPlan(1L, "enterprise"));
+    }
+
+    @Test
+    void shouldRejectTrialAsManualBillingPlan() {
+        assertFalse(service.setBillingPlan(1L, "trial"));
     }
 
     @Test

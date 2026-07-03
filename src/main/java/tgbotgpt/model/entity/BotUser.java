@@ -41,6 +41,9 @@ public class BotUser {
     @Column(name = "plan_expires_at")
     private LocalDateTime planExpiresAt;
 
+    @Column(name = "trial_ends_at")
+    private LocalDateTime trialEndsAt;
+
     @Column(nullable = false, length = 7, columnDefinition = "varchar(7) default '1970-01'")
     private String usagePeriod;
 
@@ -64,6 +67,7 @@ public class BotUser {
         this.totalMessages = 0;
         this.billingPlan = "free";
         this.planExpiresAt = null;
+        this.trialEndsAt = null;
         this.usagePeriod = java.time.YearMonth.now().toString();
         this.periodTokensUsed = 0;
         this.periodMessages = 0;
