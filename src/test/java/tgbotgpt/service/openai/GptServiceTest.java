@@ -24,6 +24,7 @@ import tgbotgpt.model.dto.response.StreamChoice;
 import tgbotgpt.model.dto.response.StreamChunk;
 import tgbotgpt.service.BotAdminService;
 import tgbotgpt.service.BotMetricsService;
+import tgbotgpt.service.BotStatsService;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
@@ -57,13 +58,16 @@ class GptServiceTest {
     @Mock
     private BotAdminService adminService;
     @Mock
+    private BotStatsService botStatsService;
+    @Mock
     private tgbotgpt.service.health.OpenAiHealthIndicator openAiHealth;
 
     private GptService gptService;
 
     @BeforeEach
     void setUp() {
-        gptService = new GptService(client, responsesClient, env, rateLimiter, userSettings, chatHistory, metrics, adminService, openAiHealth);
+        gptService = new GptService(client, responsesClient, env, rateLimiter, userSettings, chatHistory, metrics,
+                adminService, botStatsService, openAiHealth);
         ReflectionTestUtils.setField(gptService, "maxtokens", 3000);
         ReflectionTestUtils.setField(gptService, "temperature", 0.7);
         ReflectionTestUtils.setField(gptService, "defaultSystemPrompt", "You are a helpful assistant.");
@@ -709,6 +713,74 @@ class GptServiceTest {
         assertTrue(result.contains("3 @owner - OWNER"));
         assertTrue(result.contains("usage 300/unlimited tokens, 4/unlimited messages"));
         assertTrue(result.contains("actions: /admin usage 3"));
+    }
+
+    @Test
+    void shouldBuildAdminStatsForOwner() {
+        when(adminService.isOwner(99L)).thenReturn(true);
+        when(botStatsService.getAdminStats()).thenReturn(new BotStatsService.AdminStats(
+                42,
+                new java.util.LinkedHashMap<>(java.util.Map.of(
+                        "free", 30L,
+                        "trial", 5L,
+                        "pro", 6L,
+                        "owner", 1L
+                )),
+                8,
+                6,
+                1200,
+                List.of(
+                        new BotStatsService.TopUser(1L, "alice", 150, 45000, "pro"),
+                        new BotStatsService.TopUser(2L, null, 12, 3000, "free")
+                )
+        ));
+
+        String result = gptService.getAdminStats(99L);
+
+        assertTrue(result.contains("Bot stats"));
+        assertTrue(result.contains("Users: 42"));
+        assertTrue(result.contains("trial: 5"));
+        assertTrue(result.contains("converted via Stars: 6"));
+        assertTrue(result.contains("historical churn: not tracked without a trial history marker"));
+        assertTrue(result.contains("completed payments: 8"));
+        assertTrue(result.contains("unique payers: 6"));
+        assertTrue(result.contains("completed Stars: 1200"));
+        assertTrue(result.contains("1. @alice - 150 msg, 45000 tok (pro)"));
+        assertTrue(result.contains("2. 2 - 12 msg, 3000 tok (free)"));
+        assertFalse(result.contains("@null"));
+    }
+
+    @Test
+    void shouldShowEmptyAdminStatsBranches() {
+        when(adminService.isOwner(99L)).thenReturn(true);
+        when(botStatsService.getAdminStats()).thenReturn(new BotStatsService.AdminStats(
+                0,
+                new java.util.LinkedHashMap<>(java.util.Map.of(
+                        "free", 0L,
+                        "trial", 0L,
+                        "pro", 0L,
+                        "owner", 0L
+                )),
+                0,
+                0,
+                0,
+                List.of()
+        ));
+
+        String result = gptService.getAdminStats(99L);
+
+        assertTrue(result.contains("converted via Stars: 0"));
+        assertTrue(result.contains("no usage yet"));
+    }
+
+    @Test
+    void shouldDenyAdminStatsForNonOwner() {
+        when(adminService.isOwner(1L)).thenReturn(false);
+
+        String result = gptService.getAdminStats(1L);
+
+        assertEquals("Sorry, this command is only available to the bot owner.", result);
+        verify(botStatsService, never()).getAdminStats();
     }
 
     @Test

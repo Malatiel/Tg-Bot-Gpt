@@ -35,6 +35,7 @@ class AdminCommandHandler {
         String action = parts[1].toLowerCase();
         return switch (action) {
             case "status" -> adminService.statusFor(requesterId);
+            case "stats" -> gptService.getAdminStats(requesterId);
             case "users" -> gptService.getAdminUsersSummary(requesterId);
             case "usage" -> handleUsageCommand(requesterId, parts);
             case "plan" -> handlePlanCommand(requesterId, parts);

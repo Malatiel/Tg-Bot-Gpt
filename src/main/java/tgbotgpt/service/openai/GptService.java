@@ -17,6 +17,7 @@ import tgbotgpt.model.dto.response.ChatResponse;
 import tgbotgpt.model.dto.response.StreamChunk;
 import tgbotgpt.service.BotAdminService;
 import tgbotgpt.service.BotMetricsService;
+import tgbotgpt.service.BotStatsService;
 import tgbotgpt.service.ChatHistoryService;
 import tgbotgpt.service.RateLimiter;
 import tgbotgpt.service.UserSettingsService;
@@ -46,6 +47,7 @@ public class GptService {
     private final ChatHistoryService chatHistory;
     private final BotMetricsService metrics;
     private final BotAdminService adminService;
+    private final BotStatsService botStatsService;
     private final OpenAiHealthIndicator openAiHealth;
 
     @Value("${openai.maxtokens}")
@@ -74,7 +76,7 @@ public class GptService {
 
     public GptService(OpenAIApiClient client, OpenAIResponsesApiClient responsesClient, Environment env, RateLimiter rateLimiter,
                       UserSettingsService userSettings, ChatHistoryService chatHistory, BotMetricsService metrics,
-                      BotAdminService adminService, OpenAiHealthIndicator openAiHealth) {
+                      BotAdminService adminService, BotStatsService botStatsService, OpenAiHealthIndicator openAiHealth) {
         this.client = client;
         this.responsesClient = responsesClient;
         this.env = env;
@@ -83,6 +85,7 @@ public class GptService {
         this.chatHistory = chatHistory;
         this.metrics = metrics;
         this.adminService = adminService;
+        this.botStatsService = botStatsService;
         this.openAiHealth = openAiHealth;
     }
 
@@ -642,6 +645,7 @@ public class GptService {
         return """
                 Admin commands
                 /admin status
+                /admin stats
                 /admin users
                 /admin usage <telegram_id>
                 /admin approve <telegram_id> [days]
@@ -649,6 +653,42 @@ public class GptService {
                 /admin extend <telegram_id> <days>
                 /admin downgrade <telegram_id>
                 """.strip();
+    }
+
+    public String getAdminStats(Long requesterId) {
+        if (!adminService.isOwner(requesterId)) {
+            return "Sorry, this command is only available to the bot owner.";
+        }
+
+        BotStatsService.AdminStats stats = botStatsService.getAdminStats();
+        return """
+                Bot stats
+
+                Users: %d
+                  %s
+
+                Trial conversion:
+                  active trial: %d
+                  converted via Stars: %d
+                  historical churn: not tracked without a trial history marker
+
+                Stars payments:
+                  completed payments: %d
+                  unique payers: %d
+                  completed Stars: %d
+
+                Top 5 by messages:
+                %s
+                """.formatted(
+                stats.totalUsers(),
+                formatPlanCounts(stats.planCounts()),
+                planCount(stats, "trial"),
+                stats.distinctPayers(),
+                stats.completedPayments(),
+                stats.distinctPayers(),
+                stats.completedStars(),
+                formatTopUsers(stats.topUsers())
+        ).strip();
     }
 
     public String getAdminUsersSummary(Long requesterId) {
@@ -695,6 +735,49 @@ public class GptService {
             return "";
         }
         return " @" + username;
+    }
+
+    private String formatPlanCounts(Map<String, Long> planCounts) {
+        return planCounts.entrySet().stream()
+                .map(entry -> "%s: %d".formatted(entry.getKey(), entry.getValue()))
+                .collect(Collectors.joining("  "));
+    }
+
+    private long planCount(BotStatsService.AdminStats stats, String plan) {
+        return stats.planCounts().getOrDefault(plan, 0L);
+    }
+
+    private String formatTopUsers(List<BotStatsService.TopUser> users) {
+        if (users.isEmpty()) {
+            return "  no usage yet";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < users.size(); i++) {
+            BotStatsService.TopUser user = users.get(i);
+            if (i > 0) {
+                builder.append('\n');
+            }
+            builder.append("  ")
+                    .append(i + 1)
+                    .append(". ")
+                    .append(formatTopUserName(user))
+                    .append(" - ")
+                    .append(user.totalMessages())
+                    .append(" msg, ")
+                    .append(user.totalTokensUsed())
+                    .append(" tok (")
+                    .append(user.billingPlan())
+                    .append(')');
+        }
+        return builder.toString();
+    }
+
+    private String formatTopUserName(BotStatsService.TopUser user) {
+        String username = formatUsername(user.username()).trim();
+        if (!username.isEmpty()) {
+            return username;
+        }
+        return String.valueOf(user.telegramId());
     }
 
     private String adminUserActions(Long telegramId, String plan) {

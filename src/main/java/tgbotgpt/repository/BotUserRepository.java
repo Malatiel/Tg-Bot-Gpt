@@ -2,6 +2,7 @@ package tgbotgpt.repository;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import tgbotgpt.model.entity.BotUser;
 
 import java.time.LocalDateTime;
@@ -14,4 +15,9 @@ public interface BotUserRepository extends JpaRepository<BotUser, Long> {
 
     /** Most-recently-active users first; the limit is supplied via {@link Pageable}. */
     List<BotUser> findAllByOrderByLastActiveDesc(Pageable pageable);
+
+    @Query("SELECT u.billingPlan, COUNT(u) FROM BotUser u GROUP BY u.billingPlan")
+    List<Object[]> countUsersByBillingPlan();
+
+    List<BotUser> findAllByOrderByTotalMessagesDesc(Pageable pageable);
 }
