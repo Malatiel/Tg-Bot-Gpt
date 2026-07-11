@@ -474,6 +474,10 @@ public class TelegramBotService {
         telegramSender.sendReply(bot, update, message, telegramRetryMaxBackoffMs);
     }
 
+    boolean sendProactiveMessage(long chatId, String message) {
+        return telegramSender.sendMessage(bot, chatId, message, telegramRetryMaxBackoffMs);
+    }
+
     private String mapDocumentError(DocumentExtractionResult.Status status) {
         return switch (status) {
             case UNSUPPORTED_TYPE -> "Unsupported file type. Supported: PDF, TXT.";

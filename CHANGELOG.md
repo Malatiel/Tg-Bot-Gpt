@@ -5,6 +5,22 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-12 — Trial conversion and payment operations
+
+### Added
+- Seven-day Pro trials for newly registered users, with trial-aware limits and
+  automatic downgrade to Free after expiry.
+- A daily trial-expiry notification sent approximately 24 hours before the
+  trial ends, with a direct `/upgrade` call to action.
+- Owner-only `/admin stats` analytics for trial conversion, Telegram Stars
+  payments, and the most active users.
+- Telegram Stars refund handling with idempotent payment status updates and
+  safe Pro-plan downgrade behavior.
+
+### Changed
+- Telegram sending and admin command routing are split into focused components
+  to keep transport, retry, and owner-command behavior independently testable.
+
 ## [0.8.0] — 2026-07-01 — Telegram Stars payments
 
 ### Added

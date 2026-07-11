@@ -47,6 +47,24 @@ class TelegramSender {
         }
     }
 
+    boolean sendMessage(TelegramBot bot, long chatId, String message, long retryMaxBackoffMs) {
+        SendResponse sendResponse = executeWithRetry(
+                bot, buildSendMessage(chatId, message, true), "send", retryMaxBackoffMs);
+        metrics.recordTelegramSend(true, sendResponse.isOk());
+        if (sendResponse.isOk()) {
+            return true;
+        }
+
+        log.warn("Failed to send proactive Markdown message: {}", sendResponse.description());
+        SendResponse plainResponse = executeWithRetry(
+                bot, buildSendMessage(chatId, message, false), "send", retryMaxBackoffMs);
+        metrics.recordTelegramSend(false, plainResponse.isOk());
+        if (!plainResponse.isOk()) {
+            log.error("Failed to send proactive plain message: {}", plainResponse.description());
+        }
+        return plainResponse.isOk();
+    }
+
     void editMessage(TelegramBot bot, long chatId, int messageId, String text, long retryMaxBackoffMs) {
         try {
             BaseResponse response = executeWithRetry(
@@ -103,6 +121,15 @@ class TelegramSender {
         }
         if (!UpdateUtils.isPrivate(update)) {
             request.replyToMessageId(update.message().messageId());
+        }
+        return request;
+    }
+
+    private SendMessage buildSendMessage(long chatId, String message, boolean markdown) {
+        SendMessage request = new SendMessage(chatId, message)
+                .disableWebPagePreview(true);
+        if (markdown) {
+            request.parseMode(ParseMode.Markdown);
         }
         return request;
     }

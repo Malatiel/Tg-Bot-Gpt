@@ -10,6 +10,8 @@ import tgbotgpt.model.entity.BotUser;
 import tgbotgpt.repository.BotUserRepository;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -262,6 +264,27 @@ class UserSettingsServiceTest {
     }
 
     @Test
+    void shouldSelectOnlyUnnotifiedTrialsInsideNotificationWindow() {
+        LocalDateTime from = LocalDateTime.now().plusHours(20).withNano(0);
+        LocalDateTime to = from.plusHours(24);
+        BotUser atStart = trialEndingAt(10L, from, false);
+        BotUser atEnd = trialEndingAt(11L, to, false);
+        trialEndingAt(12L, from.minusSeconds(1), false);
+        trialEndingAt(13L, to.plusSeconds(1), false);
+        trialEndingAt(14L, from.plusHours(1), true);
+        BotUser free = trialEndingAt(15L, from.plusHours(1), false);
+        free.setBillingPlan("free");
+        userRepository.save(free);
+
+        List<BotUser> selected = userRepository
+                .findByBillingPlanAndTrialExpiryNotifiedFalseAndTrialEndsAtBetween("trial", from, to);
+
+        assertEquals(Set.of(atStart.getTelegramId(), atEnd.getTelegramId()), selected.stream()
+                .map(BotUser::getTelegramId)
+                .collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test
     void shouldExtendProFromExistingFutureExpiry() {
         assertTrue(service.setBillingPlan(1L, "pro", 7));
         LocalDateTime firstExpiry = service.getUsageStatus(1L, false).planExpiresAt();
@@ -270,6 +293,14 @@ class UserSettingsServiceTest {
 
         LocalDateTime extendedExpiry = service.getUsageStatus(1L, false).planExpiresAt();
         assertTrue(extendedExpiry.isAfter(firstExpiry.plusDays(6)));
+    }
+
+    private BotUser trialEndingAt(long id, LocalDateTime endsAt, boolean notified) {
+        BotUser user = new BotUser(id, "trial", "Trial");
+        user.setBillingPlan("trial");
+        user.setTrialEndsAt(endsAt);
+        user.setTrialExpiryNotified(notified);
+        return userRepository.save(user);
     }
 
     @Test

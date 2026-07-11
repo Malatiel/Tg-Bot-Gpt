@@ -13,6 +13,9 @@ public interface BotUserRepository extends JpaRepository<BotUser, Long> {
 
     List<BotUser> findByBillingPlanAndTrialEndsAtBefore(String billingPlan, LocalDateTime cutoff);
 
+    List<BotUser> findByBillingPlanAndTrialExpiryNotifiedFalseAndTrialEndsAtBetween(
+            String billingPlan, LocalDateTime from, LocalDateTime to);
+
     /** Most-recently-active users first; the limit is supplied via {@link Pageable}. */
     List<BotUser> findAllByOrderByLastActiveDesc(Pageable pageable);
 
