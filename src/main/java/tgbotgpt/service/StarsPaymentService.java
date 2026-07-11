@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import tgbotgpt.model.entity.BotUserPayment;
 import tgbotgpt.repository.BotUserPaymentRepository;
 import tgbotgpt.utils.LogUtils;
@@ -109,6 +110,67 @@ public class StarsPaymentService {
         );
     }
 
+    @Transactional
+    public RefundResult processRefund(Long userId, String chargeId) {
+        if (chargeId == null || chargeId.isBlank()) {
+            return RefundResult.failed(
+                    "Refund received, but Telegram charge id is missing. Owner has been notified.",
+                    "Stars refund for user %d has no telegram charge id".formatted(userId)
+            );
+        }
+
+        Optional<BotUserPayment> paymentOptional = paymentRepository.findByTelegramChargeId(chargeId);
+        if (paymentOptional.isEmpty()) {
+            return RefundResult.failed(
+                    "Refund received, but the original payment was not found. Owner has been notified.",
+                    "Stars refund has no matching payment\nUser: %d\nCharge: %s".formatted(userId, chargeId)
+            );
+        }
+
+        BotUserPayment payment = paymentOptional.get();
+        if (userId != null && !payment.getTelegramId().equals(userId)) {
+            return RefundResult.failed(
+                    "Refund received, but the original payment could not be matched. Owner has been notified.",
+                    "Stars refund user mismatch\nUpdate user: %d\nPayment user: %d\nCharge: %s"
+                            .formatted(userId, payment.getTelegramId(), chargeId)
+            );
+        }
+        long paymentUserId = payment.getTelegramId();
+        if ("refunded".equals(payment.getStatus())) {
+            log.info("Duplicate Stars refund charge {} for user {}",
+                    chargeId, LogUtils.hashUserId(paymentUserId));
+            return RefundResult.duplicate("Refund already processed.");
+        }
+        if (!"completed".equals(payment.getStatus())) {
+            return RefundResult.failed(
+                    "Refund received, but the payment state could not be updated. Owner has been notified.",
+                    "Stars refund has unexpected payment status\nUser: %d\nCharge: %s\nStatus: %s"
+                            .formatted(userId, chargeId, payment.getStatus())
+            );
+        }
+
+        String currentPlan = userSettingsService.getUsageStatus(paymentUserId, false).plan();
+        boolean hasOtherCompletedPayment = paymentRepository
+                .existsByTelegramIdAndStatusAndTelegramChargeIdNot(paymentUserId, "completed", chargeId);
+        boolean downgrade = "pro".equals(currentPlan) && !hasOtherCompletedPayment;
+        if (downgrade && !userSettingsService.downgradeToFree(paymentUserId)) {
+            return RefundResult.failed(
+                    "Refund received, but plan update failed. Owner has been notified.",
+                    "Stars refund plan downgrade failed\nUser: %d\nCharge: %s".formatted(paymentUserId, chargeId)
+            );
+        }
+        payment.setStatus("refunded");
+        paymentRepository.saveAndFlush(payment);
+        log.info("Processed Stars refund charge {} for user {}",
+                chargeId, LogUtils.hashUserId(paymentUserId));
+        String resultingPlan = downgrade ? "Free" : currentPlan;
+        return RefundResult.completed(
+                "Your Stars payment was refunded. Your current plan is %s.".formatted(resultingPlan),
+                "Stars payment refunded\nUser: %d\nAmount: %d Stars\nCharge: %s\nCurrent plan: %s"
+                        .formatted(paymentUserId, payment.getStarsAmount(), chargeId, resultingPlan)
+        );
+    }
+
     private Optional<String> validatePaymentFields(Long userId, String currency, Integer starsAmount, String payload) {
         if (userId == null) {
             return Optional.of("missing user");
@@ -140,6 +202,20 @@ public class StarsPaymentService {
 
         static PaymentResult failed(String userMessage, String ownerMessage) {
             return new PaymentResult(userMessage, ownerMessage, true, false);
+        }
+    }
+
+    public record RefundResult(String userMessage, String ownerMessage, boolean notifyOwners, boolean duplicate) {
+        static RefundResult completed(String userMessage, String ownerMessage) {
+            return new RefundResult(userMessage, ownerMessage, true, false);
+        }
+
+        static RefundResult duplicate(String userMessage) {
+            return new RefundResult(userMessage, null, false, true);
+        }
+
+        static RefundResult failed(String userMessage, String ownerMessage) {
+            return new RefundResult(userMessage, ownerMessage, true, false);
         }
     }
 }

@@ -141,6 +141,107 @@ class StarsPaymentServiceTest {
         verify(userSettingsService, never()).activatePaidProPlan(anyLong(), anyInt());
     }
 
+    @Test
+    void processRefundMarksPaymentRefundedAndDowngradesPlan() {
+        BotUserPaymentRepository paymentRepository = mock(BotUserPaymentRepository.class);
+        UserSettingsService userSettingsService = mock(UserSettingsService.class);
+        BotUserPayment payment = new BotUserPayment(1L, "charge-1", 100);
+        when(paymentRepository.findByTelegramChargeId("charge-1")).thenReturn(Optional.of(payment));
+        when(userSettingsService.getUsageStatus(1L, false)).thenReturn(usageStatus("pro"));
+        when(userSettingsService.downgradeToFree(1L)).thenReturn(true);
+        StarsPaymentService service = newService(paymentRepository, userSettingsService);
+
+        StarsPaymentService.RefundResult result = service.processRefund(1L, "charge-1");
+
+        assertTrue(result.notifyOwners());
+        assertTrue(result.userMessage().contains("plan is Free"));
+        assertEquals("refunded", payment.getStatus());
+        verify(userSettingsService).downgradeToFree(1L);
+        verify(paymentRepository).saveAndFlush(payment);
+    }
+
+    @Test
+    void processRefundSkipsAlreadyRefundedPayment() {
+        BotUserPaymentRepository paymentRepository = mock(BotUserPaymentRepository.class);
+        UserSettingsService userSettingsService = mock(UserSettingsService.class);
+        BotUserPayment payment = new BotUserPayment(1L, "charge-1", 100);
+        payment.setStatus("refunded");
+        when(paymentRepository.findByTelegramChargeId("charge-1")).thenReturn(Optional.of(payment));
+        StarsPaymentService service = newService(paymentRepository, userSettingsService);
+
+        StarsPaymentService.RefundResult result = service.processRefund(1L, "charge-1");
+
+        assertTrue(result.duplicate());
+        verify(userSettingsService, never()).downgradeToFree(anyLong());
+        verify(paymentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void processRefundPreservesPlanWhenAnotherCompletedPaymentExists() {
+        BotUserPaymentRepository paymentRepository = mock(BotUserPaymentRepository.class);
+        UserSettingsService userSettingsService = mock(UserSettingsService.class);
+        BotUserPayment payment = new BotUserPayment(1L, "charge-1", 100);
+        when(paymentRepository.findByTelegramChargeId("charge-1")).thenReturn(Optional.of(payment));
+        when(paymentRepository.existsByTelegramIdAndStatusAndTelegramChargeIdNot(1L, "completed", "charge-1"))
+                .thenReturn(true);
+        when(userSettingsService.getUsageStatus(1L, false)).thenReturn(usageStatus("pro"));
+        StarsPaymentService service = newService(paymentRepository, userSettingsService);
+
+        StarsPaymentService.RefundResult result = service.processRefund(1L, "charge-1");
+
+        assertTrue(result.userMessage().contains("plan is pro"));
+        assertEquals("refunded", payment.getStatus());
+        verify(userSettingsService, never()).downgradeToFree(anyLong());
+        verify(paymentRepository).saveAndFlush(payment);
+    }
+
+    @Test
+    void processRefundPreservesOwnerPlan() {
+        BotUserPaymentRepository paymentRepository = mock(BotUserPaymentRepository.class);
+        UserSettingsService userSettingsService = mock(UserSettingsService.class);
+        BotUserPayment payment = new BotUserPayment(1L, "charge-1", 100);
+        when(paymentRepository.findByTelegramChargeId("charge-1")).thenReturn(Optional.of(payment));
+        when(userSettingsService.getUsageStatus(1L, false)).thenReturn(usageStatus("owner"));
+        StarsPaymentService service = newService(paymentRepository, userSettingsService);
+
+        StarsPaymentService.RefundResult result = service.processRefund(1L, "charge-1");
+
+        assertTrue(result.userMessage().contains("plan is owner"));
+        assertEquals("refunded", payment.getStatus());
+        verify(userSettingsService, never()).downgradeToFree(anyLong());
+    }
+
+    @Test
+    void processRefundReportsUnknownChargeWithoutChangingPlan() {
+        BotUserPaymentRepository paymentRepository = mock(BotUserPaymentRepository.class);
+        UserSettingsService userSettingsService = mock(UserSettingsService.class);
+        when(paymentRepository.findByTelegramChargeId("unknown")).thenReturn(Optional.empty());
+        StarsPaymentService service = newService(paymentRepository, userSettingsService);
+
+        StarsPaymentService.RefundResult result = service.processRefund(1L, "unknown");
+
+        assertTrue(result.notifyOwners());
+        assertTrue(result.ownerMessage().contains("no matching payment"));
+        verify(userSettingsService, never()).downgradeToFree(anyLong());
+        verify(paymentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void processRefundRejectsPaymentOwnedByAnotherUser() {
+        BotUserPaymentRepository paymentRepository = mock(BotUserPaymentRepository.class);
+        UserSettingsService userSettingsService = mock(UserSettingsService.class);
+        BotUserPayment payment = new BotUserPayment(2L, "charge-1", 100);
+        when(paymentRepository.findByTelegramChargeId("charge-1")).thenReturn(Optional.of(payment));
+        StarsPaymentService service = newService(paymentRepository, userSettingsService);
+
+        StarsPaymentService.RefundResult result = service.processRefund(1L, "charge-1");
+
+        assertTrue(result.notifyOwners());
+        assertTrue(result.ownerMessage().contains("user mismatch"));
+        verify(userSettingsService, never()).downgradeToFree(anyLong());
+        verify(paymentRepository, never()).saveAndFlush(any());
+    }
+
     private StarsPaymentService newService() {
         return newService(mock(BotUserPaymentRepository.class), mock(UserSettingsService.class));
     }
@@ -151,6 +252,10 @@ class StarsPaymentServiceTest {
         ReflectionTestUtils.setField(service, "starsPrice", 100);
         ReflectionTestUtils.setField(service, "proDefaultDays", 30);
         return service;
+    }
+
+    private UserSettingsService.UsageStatus usageStatus(String plan) {
+        return new UserSettingsService.UsageStatus(plan, "2026-07", 0, 0, 0, 0, 0, 0, null);
     }
 
     private PreCheckoutQuery preCheckoutQuery(Long userId, String currency, Integer amount, String payload) {

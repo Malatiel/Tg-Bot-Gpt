@@ -237,6 +237,11 @@ public class TelegramBotService {
 
         if (update.message() == null) return;
 
+        if (update.message().refundedPayment() != null) {
+            handleRefundedPayment(update);
+            return;
+        }
+
         if (update.message().successfulPayment() != null) {
             if (ensureAllowed(update)) handleSuccessfulPayment(update);
             return;
@@ -770,6 +775,22 @@ public class TelegramBotService {
         }
     }
 
+    private void handleRefundedPayment(Update update) {
+        Message message = update.message();
+        RefundedPayment payment = message.refundedPayment();
+        StarsPaymentService.RefundResult result = starsPaymentService.processRefund(
+                message.from() != null ? message.from().id() : null,
+                payment.telegramPaymentChargeId()
+        );
+        if (result.duplicate()) {
+            return;
+        }
+        sendReply(update, result.userMessage());
+        if (result.notifyOwners()) {
+            notifyOwners(result.ownerMessage());
+        }
+    }
+
     private void handleAdminCommand(Update update) {
         sendReply(update, adminCommandHandler.handle(update));
     }
@@ -844,6 +865,9 @@ public class TelegramBotService {
         }
         if (update.message() == null) {
             return "empty";
+        }
+        if (update.message().refundedPayment() != null) {
+            return "refund";
         }
         if (update.message().successfulPayment() != null) {
             return "payment";

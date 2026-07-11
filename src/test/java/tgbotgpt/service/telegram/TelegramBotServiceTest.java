@@ -6,6 +6,7 @@ import com.pengrad.telegrambot.model.CallbackQuery;
 import com.pengrad.telegrambot.model.Chat;
 import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.PreCheckoutQuery;
+import com.pengrad.telegrambot.model.RefundedPayment;
 import com.pengrad.telegrambot.model.SuccessfulPayment;
 import com.pengrad.telegrambot.model.Update;
 import com.pengrad.telegrambot.model.User;
@@ -684,6 +685,67 @@ class TelegramBotServiceTest {
                 .anyMatch(request -> "Owner audit.".equals(request.getParameters().get("text"))));
     }
 
+    @Test
+    void refundedPaymentDowngradesPlanAndNotifiesOwner() {
+        TelegramBot bot = mock(TelegramBot.class);
+        GptService gptService = mock(GptService.class);
+        BotAdminService adminService = mock(BotAdminService.class);
+        when(adminService.getOwnerIds()).thenReturn(Set.of(99L));
+        BotMetricsService metrics = mock(BotMetricsService.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        when(starsPaymentService.processRefund(1L, "charge-1"))
+                .thenReturn(new StarsPaymentService.RefundResult("Refund processed.", "Owner refund audit.", true, false));
+        doReturn(sendResponseWith(0, null)).when(bot).execute(any(SendMessage.class));
+
+        TelegramBotService service = newService(gptService, adminService, metrics, starsPaymentService);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", refundedPaymentUpdate(1L));
+
+        verify(starsPaymentService).processRefund(1L, "charge-1");
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(bot, times(2)).execute(captor.capture());
+        assertTrue(captor.getAllValues().stream()
+                .anyMatch(request -> "Refund processed.".equals(request.getParameters().get("text"))));
+        assertTrue(captor.getAllValues().stream()
+                .anyMatch(request -> "Owner refund audit.".equals(request.getParameters().get("text"))));
+        verify(metrics).recordOperationDuration(eq("refund"), eq(true), any(Duration.class));
+    }
+
+    @Test
+    void duplicateRefundDoesNotSendAnotherNotification() {
+        TelegramBot bot = mock(TelegramBot.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        when(starsPaymentService.processRefund(1L, "charge-1"))
+                .thenReturn(new StarsPaymentService.RefundResult("Refund already processed.", null, false, true));
+        TelegramBotService service = newService(
+                mock(GptService.class), mock(BotAdminService.class), mock(BotMetricsService.class), starsPaymentService);
+        ReflectionTestUtils.setField(service, "bot", bot);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", refundedPaymentUpdate(1L));
+
+        verify(starsPaymentService).processRefund(1L, "charge-1");
+        verify(bot, never()).execute(any(SendMessage.class));
+    }
+
+    @Test
+    void refundedPaymentWithoutSenderUsesStoredPaymentOwner() {
+        TelegramBot bot = mock(TelegramBot.class);
+        StarsPaymentService starsPaymentService = mock(StarsPaymentService.class);
+        when(starsPaymentService.processRefund(isNull(), eq("charge-1")))
+                .thenReturn(new StarsPaymentService.RefundResult("Refund already processed.", null, false, true));
+        TelegramBotService service = newService(
+                mock(GptService.class), mock(BotAdminService.class), mock(BotMetricsService.class), starsPaymentService);
+        ReflectionTestUtils.setField(service, "bot", bot);
+        Update update = refundedPaymentUpdate(1L);
+        when(update.message().from()).thenReturn(null);
+
+        ReflectionTestUtils.invokeMethod(service, "processUpdate", update);
+
+        verify(starsPaymentService).processRefund(isNull(), eq("charge-1"));
+        verify(bot, never()).execute(any(SendMessage.class));
+    }
+
     private TelegramBotService newService(BotMetricsService metrics) {
         return newService(mock(GptService.class), mock(BotAdminService.class), metrics);
     }
@@ -802,6 +864,15 @@ class TelegramBotServiceTest {
         when(payment.currency()).thenReturn("XTR");
         when(payment.totalAmount()).thenReturn(100);
         when(payment.invoicePayload()).thenReturn("pro:1");
+        return update;
+    }
+
+    private Update refundedPaymentUpdate(Long userId) {
+        Update update = textUpdate(userId, null);
+        RefundedPayment payment = mock(RefundedPayment.class);
+        when(update.message().text()).thenReturn(null);
+        when(update.message().refundedPayment()).thenReturn(payment);
+        when(payment.telegramPaymentChargeId()).thenReturn("charge-1");
         return update;
     }
 
