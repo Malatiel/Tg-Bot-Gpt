@@ -15,6 +15,9 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 - **Local onboarding/help** — `/start` and `/help` explain core workflows without spending OpenAI tokens
 - **Prompt examples** — `/examples` gives Telegram-ready prompts for chat, documents, images, custom prompts, and limits
 - **Billing-ready usage limits** — free/pro/owner plans with monthly token/message limits
+- **Telegram Stars payments** — native XTR-denominated Pro purchase inside Telegram (since v0.8.0)
+- **Seven-day Pro trials** — auto-assigned to new users with trial-aware limits and automatic downgrade after expiry
+- **Trial-expiry notifications** — daily reminder ~24 hours before trial ends with a `/upgrade` call to action
 - **Plan UX** — users can view plans and request Pro; owners get usage-aware approval commands via `/admin`
 - **Rate limiting** — configurable per-user request limit (sliding window)
 - **Message encryption** — AES-256-GCM encryption for chat messages in DB (optional)
@@ -52,6 +55,7 @@ A Telegram bot powered by the OpenAI API. Supports private and group chats with 
 | `/admin extend <telegram_id> <days>` | Extend Pro from its current expiry |
 | `/admin downgrade <telegram_id>` | Move a user back to Free |
 | `/admin plan <telegram_id> <free\|pro\|owner> [days]` | Assign a user plan |
+| `/admin stats` | Show analytics: trial conversions, Stars payments, most active users |
 | `/settings`        | Show model, prompt, usage, and limits    |
 | `/model`           | Show model picker buttons                |
 | `/model <name>`    | Switch to a different GPT model          |
@@ -227,7 +231,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 - Image type and size validation before processing
 - Telegram file downloads use explicit network timeouts
 - Per-user rate limiting prevents abuse and budget overruns
-- Monthly free/pro/owner plan limits prevent unbounded OpenAI spend before payment integration exists
+- Monthly free/pro/owner plan limits prevent unbounded OpenAI spend
 - Optional AES-256-GCM encryption for chat messages in DB (protects against DB dump leaks)
 - Production profile can require encryption at startup
 - Automatic cleanup of old chat history (30-day retention)
