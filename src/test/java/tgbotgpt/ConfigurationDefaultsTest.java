@@ -35,6 +35,18 @@ class ConfigurationDefaultsTest {
     }
 
     @Test
+    void shouldOmitTemperatureForGpt56ByDefault() throws Exception {
+        Properties properties = new Properties();
+        try (InputStream stream = getClass().getClassLoader().getResourceAsStream("application.properties")) {
+            assertNotNull(stream);
+            properties.load(stream);
+        }
+
+        assertEquals("${OPENAI_TEMPERATURE_UNSUPPORTED_MODELS:gpt-5.6}",
+                properties.getProperty("openai.temperature.unsupported.models"));
+    }
+
+    @Test
     void shouldBindActuatorToLocalhostManagementPortByDefault() throws Exception {
         Properties properties = new Properties();
         try (InputStream stream = getClass().getClassLoader().getResourceAsStream("application.properties")) {

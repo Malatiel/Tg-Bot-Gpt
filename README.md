@@ -183,7 +183,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `openai.responses.url`         | OpenAI Responses API endpoint        | `https://api.openai.com/v1/responses` |
 | `openai.model`                 | Default OpenAI model                 | `${OPENAI_MODEL:gpt-5.4-nano}` |
 | `openai.temperature`           | Response creativity (0.0 - 1.0)      | `0.7`                 |
-| `openai.temperature.unsupported.models` | Comma-separated model-name prefixes that reject a custom temperature; it is omitted for them | `${OPENAI_TEMPERATURE_UNSUPPORTED_MODELS:}` (empty) |
+| `openai.temperature.unsupported.models` | Comma-separated model-name prefixes that reject a custom temperature; it is omitted for them | `${OPENAI_TEMPERATURE_UNSUPPORTED_MODELS:gpt-5.6}` |
 | `openai.maxtokens`             | Max tokens per response              | `3000`                |
 | `openai.max.message.pool.size` | Recent messages loaded from DB as context | `7`                   |
 | `openai.max.history.tokens`    | Approximate token budget for DB history loaded as context | `${OPENAI_MAX_HISTORY_TOKENS:2000}` |
