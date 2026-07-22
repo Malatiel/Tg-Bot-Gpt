@@ -857,6 +857,21 @@ class GptServiceTest {
     }
 
     @Test
+    void shouldKeepGpt56ForVision() {
+        Update update = createPrivateUpdate(1L, null);
+        when(rateLimiter.isAllowed(1L)).thenReturn(true);
+        when(userSettings.getModel(1L)).thenReturn("gpt-5.6-luna");
+        when(userSettings.getSystemPrompt(1L)).thenReturn("prompt");
+        when(userSettings.getOrCreateUser(eq(1L), any(), any())).thenReturn(null);
+        when(userSettings.containsInjection(any())).thenReturn(false);
+        when(client.getCompletion(any(ChatRequest.class))).thenReturn(Mono.just(createResponse("ok")));
+
+        gptService.sendVisionMessage(update, "base64", "image/jpeg", "Describe");
+
+        verify(client).getCompletion(argThat(req -> "gpt-5.6-luna".equals(req.getModel())));
+    }
+
+    @Test
     void shouldKeepGpt4oForVision() {
         Update update = createPrivateUpdate(1L, null);
         when(rateLimiter.isAllowed(1L)).thenReturn(true);

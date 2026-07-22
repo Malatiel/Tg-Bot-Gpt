@@ -923,6 +923,7 @@ public class GptService {
 
     private boolean supportsImageInput(String model) {
         return model != null && (
+                model.startsWith("gpt-5.6") ||
                 model.startsWith("gpt-5.4") ||
                 model.startsWith("gpt-4o")
         );
