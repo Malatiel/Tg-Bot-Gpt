@@ -5,6 +5,27 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-07-22 — Model lineup and licensing
+
+### Added
+- `gpt-5.6-luna` and `gpt-5.6-terra` as selectable models via `/model`. The
+  default stays `gpt-5.4-nano`: the 5.6 tier costs roughly five times more per
+  token, so it is opt-in rather than automatic.
+- A `LICENSE` file (PolyForm Noncommercial 1.0.0) and `CONTRIBUTING.md` with a
+  contributor license agreement.
+
+### Fixed
+- Image input detection matched only the `gpt-5.4` and `gpt-4o` prefixes, so a
+  user on a `gpt-5.6` model was silently downgraded to the default model when
+  sending a photo.
+- The configured temperature is now omitted for `gpt-5.6` by default. Those
+  reasoning models reject any temperature other than their own, which would
+  have failed every `gpt-5.6` request with a 400.
+
+### Changed
+- Removed section-banner and code-restating comments from `GptService` and
+  `TelegramBotService`; the banners no longer matched the code they labelled.
+
 ## [0.9.0] — 2026-07-12 — Trial conversion and payment operations
 
 ### Added
