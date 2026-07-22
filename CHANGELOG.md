@@ -5,6 +5,13 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-07-22 — Licence metadata
+
+### Fixed
+- The copyright holder's name is spelled consistently across `LICENSE`, its
+  `Required Notice` line, and the README. The 0.9.1 artifacts carry the earlier
+  spelling; the repository `LICENSE` governs either way.
+
 ## [0.9.1] — 2026-07-22 — Model lineup and licensing
 
 ### Added
