@@ -267,7 +267,7 @@ See [DEPLOY.md](DEPLOY.md) for production runbook and [CHANGELOG.md](CHANGELOG.m
 
 ## License
 
-Copyright (c) 2024-2026 Aleksei N.
+Copyright (c) 2024-2026 Alexey N.
 
 Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
 
