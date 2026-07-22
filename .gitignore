@@ -58,3 +58,8 @@ build/
 
 ### Logs ###
 *.log
+
+### Local agent/assistant files ###
+AGENTS.md
+memory/
+.claude/

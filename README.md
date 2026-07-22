@@ -267,4 +267,19 @@ See [DEPLOY.md](DEPLOY.md) for production runbook and [CHANGELOG.md](CHANGELOG.m
 
 ## License
 
-This project is for personal/educational use.
+Copyright (c) 2024-2026 Aleksei N.
+
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+**You may** use, fork, modify, and share this project for any **noncommercial**
+purpose — personal use, learning, research, or your own non-paid projects —
+as long as you keep the copyright notice intact.
+
+**You may not** use it commercially, or present it (or a substantial part of
+it) as your own work, without prior written permission. Using the code as
+training data for machine learning models also requires permission — see the
+addendum in [LICENSE](LICENSE).
+
+Publishing the source does not transfer ownership: the copyright in this
+codebase stays with the author, and anyone who forks it holds rights only in
+their own changes. For commercial licensing, contact the author via GitHub.
