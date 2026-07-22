@@ -283,3 +283,6 @@ addendum in [LICENSE](LICENSE).
 Publishing the source does not transfer ownership: the copyright in this
 codebase stays with the author, and anyone who forks it holds rights only in
 their own changes. For commercial licensing, contact the author via GitHub.
+
+Pull requests are not actively sought; see [CONTRIBUTING.md](CONTRIBUTING.md)
+for the terms that apply if you open one anyway.
