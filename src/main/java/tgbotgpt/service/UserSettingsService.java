@@ -37,7 +37,7 @@ public class UserSettingsService {
     @Value("${openai.systemprompt}")
     private String defaultSystemPrompt;
 
-    @Value("${openai.allowed.models:gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o}")
+    @Value("${openai.allowed.models:gpt-5.4-nano,gpt-5.4-mini,gpt-5.6-luna,gpt-5.6-terra,gpt-4o-mini,gpt-4o}")
     private String allowedModelsString;
 
     @Value("${bot.prompt.max.length:500}")

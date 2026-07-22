@@ -30,7 +30,7 @@ class ConfigurationDefaultsTest {
         }
 
         assertEquals("${OPENAI_MODEL:gpt-5.4-nano}", properties.getProperty("openai.model"));
-        assertEquals("${OPENAI_ALLOWED_MODELS:gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o}",
+        assertEquals("${OPENAI_ALLOWED_MODELS:gpt-5.4-nano,gpt-5.4-mini,gpt-5.6-luna,gpt-5.6-terra,gpt-4o-mini,gpt-4o}",
                 properties.getProperty("openai.allowed.models"));
     }
 

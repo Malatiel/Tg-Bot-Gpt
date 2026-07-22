@@ -100,7 +100,7 @@ BOT_OWNER_IDS=your-telegram-user-id
 OPENAI_APIKEY=your-openai-api-key
 OPENAI_API_MODE=responses
 OPENAI_MODEL=gpt-5.4-nano
-OPENAI_ALLOWED_MODELS=gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o
+OPENAI_ALLOWED_MODELS=gpt-5.4-nano,gpt-5.4-mini,gpt-5.6-luna,gpt-5.6-terra,gpt-4o-mini,gpt-4o
 OPENAI_MAX_HISTORY_TOKENS=2000
 SPRING_PROFILES_ACTIVE=dev
 POSTGRES_USER=postgres
@@ -134,7 +134,7 @@ export BOT_OWNER_IDS=your-telegram-user-id
 export OPENAI_APIKEY=your-openai-api-key
 export OPENAI_API_MODE=responses
 export OPENAI_MODEL=gpt-5.4-nano
-export OPENAI_ALLOWED_MODELS=gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o
+export OPENAI_ALLOWED_MODELS=gpt-5.4-nano,gpt-5.4-mini,gpt-5.6-luna,gpt-5.6-terra,gpt-4o-mini,gpt-4o
 export OPENAI_MAX_HISTORY_TOKENS=2000
 export SPRING_PROFILES_ACTIVE=dev
 export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/tgbotgpt
@@ -187,7 +187,7 @@ Common settings are in `src/main/resources/application.properties`; profile-spec
 | `openai.maxtokens`             | Max tokens per response              | `3000`                |
 | `openai.max.message.pool.size` | Recent messages loaded from DB as context | `7`                   |
 | `openai.max.history.tokens`    | Approximate token budget for DB history loaded as context | `${OPENAI_MAX_HISTORY_TOKENS:2000}` |
-| `openai.allowed.models`        | Comma-separated models users can choose via `/model <name>` | `${OPENAI_ALLOWED_MODELS:gpt-5.4-nano,gpt-5.4-mini,gpt-4o-mini,gpt-4o}` |
+| `openai.allowed.models`        | Comma-separated models users can choose via `/model <name>` | `${OPENAI_ALLOWED_MODELS:gpt-5.4-nano,gpt-5.4-mini,gpt-5.6-luna,gpt-5.6-terra,gpt-4o-mini,gpt-4o}` |
 | `bot.whitelist`                | Allowed user IDs/usernames/group titles (empty = owner-only) | empty             |
 | `bot.rate.limit`               | Max requests per user per window     | `10`                  |
 | `bot.rate.window.seconds`      | Rate limit window in seconds         | `60`                  |
