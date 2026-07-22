@@ -158,8 +158,6 @@ public class GptService {
         }
     }
 
-    // --- Shared gate: permission + rate limit + ensure user ---
-
     /**
      * Validates permission, rate limit, and ensures user exists.
      * Returns an error message if blocked, or empty if OK.
@@ -185,8 +183,6 @@ public class GptService {
         return Optional.empty();
     }
 
-    // --- Shared helpers ---
-
     private Message createSystemMessage(String prompt) {
         Message msg = new Message();
         msg.setRole("system");
@@ -203,8 +199,6 @@ public class GptService {
             userSettings.recordMessage(userId);
         }
     }
-
-    // --- Public API ---
 
     public String sendMessage(Update update) {
         return sendMessage(update, true);
@@ -727,8 +721,6 @@ public class GptService {
         }
         return getBalanceSummary(targetUserId);
     }
-
-    // --- Private helpers ---
 
     private String formatUsername(String username) {
         if (username == null || username.isBlank()) {

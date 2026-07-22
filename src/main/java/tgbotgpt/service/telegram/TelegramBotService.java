@@ -247,7 +247,6 @@ public class TelegramBotService {
             return;
         }
 
-        // Handle documents
         if (update.message().document() != null) {
             if (UpdateUtils.isPrivate(update) || hasBotMention(update)) {
                 if (ensureAllowed(update)) processDocument(update);
@@ -255,7 +254,6 @@ public class TelegramBotService {
             return;
         }
 
-        // Handle photos
         if (update.message().photo() != null && update.message().photo().length > 0) {
             if (UpdateUtils.isPrivate(update) || hasBotMention(update)) {
                 if (ensureAllowed(update)) processPhoto(update);
@@ -263,7 +261,6 @@ public class TelegramBotService {
             return;
         }
 
-        // Handle text
         if (update.message().text() != null) {
             if (update.message().text().startsWith("/")) {
                 if (ensureAllowed(update)) processCommand(update);
